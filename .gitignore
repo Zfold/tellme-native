@@ -42,4 +42,3 @@ yarn-error.*
 /ios
 /android
 
-src/constants/index.js
