@@ -32,6 +32,8 @@ yarn-error.*
 
 # local env files
 .env*.local
+.env
+app.config.js
 
 # typescript
 *.tsbuildinfo
@@ -39,3 +41,5 @@ yarn-error.*
 # generated native folders
 /ios
 /android
+
+src/constants/index.js
