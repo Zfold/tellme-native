@@ -1,14 +1,11 @@
 import {
-  ANTHROPIC_KEY,
-  ANTHROPIC_URL,
-  GOOGLE_VISION_URL,
-  NOMINATIM_URL,
-  CLAUDE_MODEL,
-  CLAUDE_MAX_TOKENS,
   LANDMARKS,
   getCurrentSeason,
   CATEGORY_ICONS,
 } from "../constants";
+
+// ── RAILWAY BACKEND URL ───────────────────────────────────────────────────────
+const BACKEND_URL = "https://tellme-backend-production.up.railway.app";
 
 // ── IMAGE COMPRESSION ─────────────────────────────────────────────────────────
 export const compressImage = async (uri) => {
@@ -55,7 +52,7 @@ export const extractGPSFromExif = (exif) => {
 export const reverseGeocode = async (lat, lng) => {
   try {
     const res = await fetch(
-      `${NOMINATIM_URL}?lat=${lat}&lng=${lng}&format=json`,
+      `https://nominatim.openstreetmap.org/reverse?lat=${lat}&lng=${lng}&format=json`,
       { headers: { "Accept-Language": "en", "User-Agent": "TellMeApp/1.0" } }
     );
     const data = await res.json();
@@ -93,35 +90,16 @@ export const findNearbyLandmark = (coords) => {
   return null;
 };
 
-// ── GOOGLE VISION API ─────────────────────────────────────────────────────────
+// ── GOOGLE VISION — via Railway backend ──────────────────────────────────────
 export const callGoogleVision = async (base64) => {
   try {
-    const res = await fetch(GOOGLE_VISION_URL, {
+    const res = await fetch(`${BACKEND_URL}/vision`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        requests: [{
-          image: { content: base64 },
-          features: [
-            { type: "LABEL_DETECTION",    maxResults: 10 },
-            { type: "LANDMARK_DETECTION", maxResults: 3  },
-            { type: "WEB_DETECTION",      maxResults: 10 },
-            { type: "TEXT_DETECTION",     maxResults: 1  },
-          ],
-          imageContext: {
-            webDetectionParams: {
-              includeGeoResults: true,
-            },
-          },
-        }],
-      }),
+      body: JSON.stringify({ base64, mime: "image/jpeg" }),
     });
-    const data = await res.json();
-    if (!res.ok) {
-      console.warn("Vision API error:", data);
-      return null;
-    }
-    return data.responses?.[0] || null;
+    if (!res.ok) return null;
+    return await res.json();
   } catch (e) {
     console.warn("Vision API failed:", e.message);
     return null;
@@ -129,14 +107,6 @@ export const callGoogleVision = async (base64) => {
 };
 
 // ── BUILD VISION CONTEXT ──────────────────────────────────────────────────────
-// Priority order mirrors Google Image Search accuracy:
-// 1. Landmark detection (GPS-verified)
-// 2. Full image matches (exact web matches)
-// 3. Best guess labels (Google's reverse image search result)
-// 4. Web entities (named entities from matching pages)
-// 5. Page titles (product names from matching pages)
-// 6. Detected text (brand names, labels visible in image)
-// 7. Label detection (shape/color classification — lowest priority)
 export const buildVisionContext = (visionResult) => {
   if (!visionResult) return null;
 
@@ -151,7 +121,6 @@ export const buildVisionContext = (visionResult) => {
 
   const lines = [];
 
-  // ── PRIORITY 1: Landmark ──────────────────────────────────────────────────
   if (landmarks.length > 0) {
     const lm = landmarks[0];
     const score = Math.round((lm.score || 0) * 100);
@@ -163,52 +132,38 @@ export const buildVisionContext = (visionResult) => {
     return lines.join("\n");
   }
 
-  // ── PRIORITY 2: Detected text in image ───────────────────────────────────
-  // Brand names and product labels visible in the image are highly reliable
   if (detectedText && detectedText.length > 2 && detectedText.length < 200) {
     const cleanText = detectedText.replace(/\n/g, " ").trim();
     lines.push(`TEXT DETECTED IN IMAGE: "${cleanText}"`);
-    lines.push("Use this text as strong identification evidence — it is what is literally written on the subject.");
+    lines.push("Use this text as strong identification evidence.");
   }
 
-  // ── PRIORITY 3: Best guess (Google reverse image search result) ───────────
   if (bestGuesses.length > 0) {
     lines.push(`\nGOOGLE REVERSE IMAGE SEARCH RESULT:`);
     bestGuesses.forEach(g => lines.push(`  "${g}"`));
-    lines.push("This is Google's best guess from matching against billions of web images.");
-    lines.push("Treat this as your PRIMARY identification — it is equivalent to Google Image Search.");
+    lines.push("Treat this as your PRIMARY identification — equivalent to Google Image Search.");
   }
 
-  // ── PRIORITY 4: Full image matches ───────────────────────────────────────
   if (fullMatches.length > 0) {
     lines.push(`\nEXACT IMAGE MATCHES FOUND ON WEB: ${fullMatches.length} exact matches`);
-    lines.push("The exact image was found on multiple web pages — high confidence identification.");
   }
 
-  // ── PRIORITY 5: Web entities ─────────────────────────────────────────────
   if (webEntities.length > 0) {
     const topEntities = webEntities
       .slice(0, 5)
       .map(e => `${e.description} (${Math.round(e.score * 100)}%)`)
       .join(", ");
-    lines.push(`\nWEB ENTITIES FROM MATCHING PAGES: ${topEntities}`);
+    lines.push(`\nWEB ENTITIES: ${topEntities}`);
   }
 
-  // ── PRIORITY 6: Page titles ───────────────────────────────────────────────
   if (pageMatches.length > 0) {
-    const titles = pageMatches
-      .map(p => p.pageTitle)
-      .filter(Boolean)
-      .slice(0, 3);
+    const titles = pageMatches.map(p => p.pageTitle).filter(Boolean).slice(0, 3);
     if (titles.length > 0) {
       lines.push(`\nMATCHING PAGE TITLES:`);
       titles.forEach(t => lines.push(`  - ${t}`));
-      lines.push("Extract product or subject names from these page titles.");
     }
   }
 
-  // ── PRIORITY 7: Label classification (lowest — shape/color only) ──────────
-  // Only use labels if we have nothing better
   const hasStrongSignal = bestGuesses.length > 0 || webEntities.length > 0 || detectedText;
   if (!hasStrongSignal && labels.length > 0) {
     const topLabels = labels
@@ -217,35 +172,22 @@ export const buildVisionContext = (visionResult) => {
       .map(l => `${l.description} (${Math.round(l.score * 100)}%)`)
       .join(", ");
     if (topLabels) lines.push(`\nVISUAL CLASSIFICATION LABELS: ${topLabels}`);
-    lines.push("Note: No web matches found. Base identification on visual evidence and any text in the image.");
   } else if (hasStrongSignal && labels.length > 0) {
-    // Include labels as supporting context only
-    const supporting = labels
-      .filter(l => l.score > 0.8)
-      .slice(0, 3)
-      .map(l => l.description)
-      .join(", ");
+    const supporting = labels.filter(l => l.score > 0.8).slice(0, 3).map(l => l.description).join(", ");
     if (supporting) lines.push(`\nSupporting visual context: ${supporting}`);
   }
 
   if (lines.length === 0) return null;
 
-  // Confidence guidance
   lines.push("\n── IDENTIFICATION INSTRUCTIONS ──");
   if (detectedText && bestGuesses.length > 0) {
-    lines.push("CONFIDENCE: VERY HIGH — text detected in image plus web reverse image match.");
-    lines.push("Prioritize the detected text and web result over any shape-based classification.");
-    lines.push("If the detected text matches a known product or brand, identify it specifically.");
+    lines.push("CONFIDENCE: VERY HIGH — text detected plus web match. Prioritize over shape-based labels.");
   } else if (bestGuesses.length > 0 || fullMatches.length > 0) {
-    lines.push("CONFIDENCE: HIGH — web reverse image match available.");
-    lines.push("Use the Google reverse image search result as ground truth for identification.");
-    lines.push("Do NOT let generic shape/color labels override a specific web identification.");
+    lines.push("CONFIDENCE: HIGH — web reverse image match. Do NOT let generic labels override this.");
   } else if (webEntities.length > 0) {
-    lines.push("CONFIDENCE: MODERATE — named web entities available.");
-    lines.push("Use web entities as primary identification signal.");
+    lines.push("CONFIDENCE: MODERATE — named web entities available. Use as primary signal.");
   } else {
-    lines.push("CONFIDENCE: LOW — no web matches. Identify from visual evidence only.");
-    lines.push("Be honest about uncertainty. Check for any text or logos in the image.");
+    lines.push("CONFIDENCE: LOW — no web matches. Identify from visual evidence only. Be honest about uncertainty.");
   }
 
   return lines.join("\n");
@@ -254,31 +196,27 @@ export const buildVisionContext = (visionResult) => {
 // ── BUILD CLAUDE PROMPT ───────────────────────────────────────────────────────
 export const buildPrompt = (locationContext, visionContext) => `You are the AI engine for "Tell ME" — a visual identification and information app. When given an image, respond ONLY with a valid JSON object (no markdown, no backticks, no preamble).
 
-Your goal: identify accurately, then inform richly. You are a knowledgeable tour guide and expert companion — not a label maker.
+Your goal: identify accurately, then inform richly. You are a knowledgeable tour guide and expert companion.
 
 IDENTIFICATION HIERARCHY — follow this order strictly:
-1. TEXT DETECTED IN IMAGE — if text/brand names were found, identify that specific product or subject
-2. GOOGLE REVERSE IMAGE SEARCH RESULT — treat as ground truth, same as Google Image Search
+1. TEXT DETECTED IN IMAGE — brand names and labels in the image are highly reliable
+2. GOOGLE REVERSE IMAGE SEARCH RESULT — treat as ground truth
 3. WEB ENTITIES — named subjects from matching web pages
 4. PAGE TITLES — extract product/subject names from matching pages
-5. VISUAL LABELS — only use as last resort when no web data is available
+5. VISUAL LABELS — only use as last resort
 
-NEVER let generic shape or color labels (can, bottle, cylinder, container) override a specific web identification. If Google's reverse image search says "Fast Fret Guitar String Cleaner" and visual labels say "red cylinder", the answer is Fast Fret.
+NEVER let generic shape or color labels override a specific web identification.
 
-${visionContext
-  ? `GOOGLE VISION DATA:\n${visionContext}`
-  : "No Google Vision data — identify from visual evidence only."}
+${visionContext ? `GOOGLE VISION DATA:\n${visionContext}` : "No Google Vision data — identify from visual evidence only."}
 
-${locationContext
-  ? `LOCATION CONTEXT:\n${locationContext}\n\nUse location as helpful context. Cultivated environments may have non-native species. Replicas exist far from originals. Imported food is global. Identify what you see — use location to add nuance, never to override visual evidence.`
-  : "No location data available."}
+${locationContext ? `LOCATION CONTEXT:\n${locationContext}\n\nUse location as helpful context. Cultivated environments may have non-native species. Replicas exist far from originals. Imported food is global. Identify what you see — use location to add nuance, never to override visual evidence.` : "No location data available."}
 
 Return this exact JSON:
 {
   "subject": "Specific identification — brand name, species, landmark, dish etc.",
   "tagline": "One evocative sentence capturing the essence",
   "confidence": 0-100,
-  "confidenceNote": "Brief honest note about certainty and what evidence supports it",
+  "confidenceNote": "Brief honest note about certainty and evidence",
   "subjectCategory": "One of: Landmark, Architecture, Artwork, Spider, Insect, Bird, Mammal, Reptile, Mushroom, Plant, Flower, Tree, Food, Product, Animal, Object, Other",
   "richDetail": true or false,
   "safetyFlag": true or false,
@@ -293,46 +231,30 @@ Return this exact JSON:
   "followUpSuggestions": ["Question 1?", "Question 2?", "Question 3?"]
 }
 
-SECTION GUIDELINES by subject:
+SECTION GUIDELINES:
 - Products/brands: What It Is, History and Brand Story, How It Is Used, Where to Buy
 - Landmarks: History, Architect and Style, What Is Inside, Visitor Tips
 - Spiders/insects: Species and Range, Behaviour, Venom or Safety, Interesting Adaptation
 - Plants/flowers: Species and Habitat, Growing Season, Uses, Lookalikes
 - Mushrooms: Species and Habitat, Edibility WARNING, Lookalikes, Ecological Role
 - Animals: Species and Habitat, Behaviour, Conservation Status, Interesting Adaptation
-- Food/dishes: Origin and Culture, Key Ingredients, Regional Variations, How to Eat
+- Food: Origin and Culture, Key Ingredients, Regional Variations, How to Eat
 - Everyday objects: 1-2 sections, richDetail false
 - quickFacts: 3-5 items max
 - safetyFlag true for mushrooms, spiders, snakes, plant berries, venomous creatures
-- BREVITY: 2-3 sentences per section body max
-- Be specific. Be accurate. Read any visible text in the image before guessing.`;
+- BREVITY: 2-3 sentences per section max
+- Be specific. Be accurate. Read any visible text before guessing.`;
 
-// ── QUICK SUBJECT CHECK ───────────────────────────────────────────────────────
+// ── QUICK SUBJECT CHECK — via Railway backend ─────────────────────────────────
 export const quickSubjectCheck = async (base64, mime = "image/jpeg") => {
   try {
-    const res = await fetch(ANTHROPIC_URL, {
+    const res = await fetch(`${BACKEND_URL}/subject-check`, {
       method: "POST",
-      headers: {
-        "content-type": "application/json",
-        "x-api-key": ANTHROPIC_KEY,
-        "anthropic-version": "2023-06-01",
-        "anthropic-dangerous-direct-browser-access": "true",
-      },
-      body: JSON.stringify({
-        model: CLAUDE_MODEL,
-        max_tokens: 10,
-        messages: [{
-          role: "user",
-          content: [
-            { type: "image", source: { type: "base64", media_type: mime, data: base64 } },
-            { type: "text", text: "Reply with ONE word only. Reply NATURE if this shows wildlife, insects, spiders, plants, mushrooms, fungi, flowers, trees, birds, reptiles, or any living organism in nature. Reply OTHER if this shows landmarks, buildings, architecture, food, products, artwork, sculptures, or everyday objects." },
-          ],
-        }],
-      }),
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ base64, mime }),
     });
     const data = await res.json();
-    const word = data.content?.[0]?.text?.trim().toUpperCase() || "NATURE";
-    return word.includes("NATURE");
+    return data.isNature ?? true;
   } catch {
     return true;
   }
@@ -354,22 +276,12 @@ export const triageImage = async (base64, mime, coords, exifPresent) => {
   return { useVision: false, route: "non_nature_with_gps", nearbyLandmark: null };
 };
 
-// ── CALL CLAUDE ───────────────────────────────────────────────────────────────
+// ── CALL CLAUDE — via Railway backend ─────────────────────────────────────────
 export const callClaude = async (messages, system) => {
-  const res = await fetch(ANTHROPIC_URL, {
+  const res = await fetch(`${BACKEND_URL}/analyze`, {
     method: "POST",
-    headers: {
-      "content-type": "application/json",
-      "x-api-key": ANTHROPIC_KEY,
-      "anthropic-version": "2023-06-01",
-      "anthropic-dangerous-direct-browser-access": "true",
-    },
-    body: JSON.stringify({
-      model: CLAUDE_MODEL,
-      max_tokens: CLAUDE_MAX_TOKENS,
-      system: system || undefined,
-      messages,
-    }),
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ messages, system }),
   });
   const data = await res.json();
   if (!res.ok) {
