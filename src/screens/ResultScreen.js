@@ -269,14 +269,22 @@ export default function ResultScreen({ navigation, route }) {
     setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 100);
 
     try {
-      const messages = [{
-        role: "user",
-        content: [
-          { type: "image", source: { type: "base64", media_type: imageMime, data: compressedBase64 } },
-          { type: "text", text: `The user is viewing "${activeResult.subject}". They ask: "${msg}". Answer as a knowledgeable expert in 2-4 sentences.` },
-        ],
-      }];
-      const reply = await callClaude(messages, null);
+      const response = await fetch("https://tellme-backend-production.up.railway.app/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          subject: activeResult.subject,
+          messages: [{
+            role: "user",
+            content: [
+              { type: "image", source: { type: "base64", media_type: imageMime, data: compressedBase64 } },
+              { type: "text", text: msg },
+            ],
+          }],
+        }),
+      });
+      const data = await response.json();
+      const reply = data.content?.find(b => b.type === "text")?.text || "Sorry, something went wrong.";
       setChatHistory([...newHistory, { role: "assistant", text: reply }]);
     } catch {
       setChatHistory([...newHistory, { role: "assistant", text: "Sorry, something went wrong." }]);
