@@ -5,6 +5,7 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import * as ImagePicker from "expo-image-picker";
+import * as Location from "expo-location";
 import { useFocusEffect } from "@react-navigation/native";
 import { COLORS, RADIUS, FREE_SCANS_PER_DAY } from "../constants";
 import {
@@ -101,16 +102,39 @@ export default function HomeScreen({ navigation }) {
       setStatusText("Preparing image...");
       const compressed = await compressImage(asset.uri);
 
-      // Step 2 — Extract location
+      // Step 2 — Extract location (EXIF first, device GPS fallback)
       let coords = null;
       let locData = null;
       let locationContext = null;
       let exifPresent = false;
 
-      if (settings.useLocation && asset.exif) {
-        setStatusText("Reading location...");
-        coords = extractGPSFromExif(asset.exif);
-        exifPresent = !!coords;
+      if (settings.useLocation) {
+        // Try EXIF GPS first
+        if (asset.exif) {
+          setStatusText("Reading photo location...");
+          coords = extractGPSFromExif(asset.exif);
+          exifPresent = !!coords;
+        }
+
+        // Fallback to device GPS if EXIF has no coordinates
+        if (!coords) {
+          setStatusText("Getting device location...");
+          try {
+            const { status } = await Location.requestForegroundPermissionsAsync();
+            if (status === "granted") {
+              const position = await Location.getCurrentPositionAsync({
+                accuracy: Location.Accuracy.Balanced,
+                timeout: 5000,
+              });
+              coords = { lat: position.coords.latitude, lng: position.coords.longitude };
+              exifPresent = true; // treat device GPS same as EXIF for triage purposes
+            }
+          } catch (e) {
+            console.warn("Device GPS fallback failed:", e.message);
+          }
+        }
+
+        // Reverse geocode whatever coordinates we have
         if (coords) {
           setStatusText("Resolving location...");
           locData = await reverseGeocode(coords.lat, coords.lng);
