@@ -4,23 +4,8 @@ import * as FileSystem from "expo-file-system/legacy";
 
 // Convert a local image URI to base64 for embedding in HTML
 const imageToBase64 = async (uri) => {
-  try {
-    if (!uri) return null;
-    // Handle content:// URIs on Android by copying to cache first
-    let fileUri = uri;
-    if (uri.startsWith("content://") || uri.startsWith("ph://")) {
-      const filename = `tellme_temp_${Date.now()}.jpg`;
-      fileUri = `${FileSystem.cacheDirectory}${filename}`;
-      await FileSystem.copyAsync({ from: uri, to: fileUri });
-    }
-    const base64 = await FileSystem.readAsStringAsync(fileUri, {
-      encoding: FileSystem.EncodingType.Base64,
-    });
-    return `data:image/jpeg;base64,${base64}`;
-  } catch (e) {
-    console.warn("Image to base64 failed:", e.message);
-    return null;
-  }
+ 
+  return null;
 };
 
 // ── MAIN EXPORT FUNCTION ──────────────────────────────────────────────────────
