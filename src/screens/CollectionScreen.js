@@ -1,11 +1,12 @@
 import { useState } from "react";
 import {
   View, Text, StyleSheet, ScrollView,
-  TouchableOpacity, Image, Alert, Modal,
+  TouchableOpacity, Image, Alert, Modal, ActivityIndicator,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { COLORS, RADIUS } from "../constants";
 import { deleteEntry } from "../utils/storage";
+import { exportCollectionPDF } from "../utils/pdfExport";
 
 function ConfirmModal({ title, message, confirmLabel, onConfirm, onCancel }) {
   return (
@@ -36,6 +37,17 @@ export default function CollectionScreen({ navigation, route }) {
     (route.params.entries || []).filter(e => e.collections?.includes(collection.name))
   );
   const [confirmDelete, setConfirmDelete] = useState(null);
+  const [sharing, setSharing] = useState(false);
+
+  const handleShare = async () => {
+    setSharing(true);
+    try {
+      await exportCollectionPDF(collection, route.params.entries || []);
+    } catch (e) {
+      Alert.alert("Export Error", e.message || "Could not generate PDF.");
+    }
+    setSharing(false);
+  };
 
   const handleDeleteEntry = (entry) => {
     setConfirmDelete({
@@ -63,12 +75,23 @@ export default function CollectionScreen({ navigation, route }) {
         <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
           <Text style={styles.backText}>← JOURNAL</Text>
         </TouchableOpacity>
-        <View style={styles.headerRight}>
-          <Text style={styles.collIcon}>{collection.icon || "📁"}</Text>
-          <View>
-            <Text style={styles.title}>{collection.name}</Text>
-            <Text style={styles.subtitle}>{entries.length} {entries.length === 1 ? "entry" : "entries"}</Text>
+        <View style={styles.headerRow}>
+          <View style={styles.headerRight}>
+            <Text style={styles.collIcon}>{collection.icon || "📁"}</Text>
+            <View>
+              <Text style={styles.title}>{collection.name}</Text>
+              <Text style={styles.subtitle}>{entries.length} {entries.length === 1 ? "entry" : "entries"}</Text>
+            </View>
           </View>
+          {entries.length > 0 && (
+            <TouchableOpacity style={styles.shareBtn} onPress={handleShare} disabled={sharing}>
+              {sharing ? (
+                <ActivityIndicator color={COLORS.accent} size="small" />
+              ) : (
+                <Text style={styles.shareBtnText}>📤 SHARE</Text>
+              )}
+            </TouchableOpacity>
+          )}
         </View>
       </View>
 
@@ -126,10 +149,13 @@ const styles = StyleSheet.create({
   header:           { padding: 20, paddingBottom: 12 },
   backBtn:          { marginBottom: 12 },
   backText:         { color: COLORS.accent, fontSize: 10, fontFamily: "Courier New", letterSpacing: 1 },
-  headerRight:      { flexDirection: "row", alignItems: "center", gap: 12 },
+  headerRow:        { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
+  headerRight:      { flexDirection: "row", alignItems: "center", gap: 12, flex: 1 },
   collIcon:         { fontSize: 32 },
   title:            { color: COLORS.white, fontSize: 22, fontWeight: "700" },
   subtitle:         { color: COLORS.textMuted, fontSize: 12, fontStyle: "italic", marginTop: 2 },
+  shareBtn:         { backgroundColor: COLORS.accentDim, borderWidth: 1, borderColor: COLORS.accentBorder, borderRadius: RADIUS.md, paddingVertical: 10, paddingHorizontal: 16 },
+  shareBtnText:     { color: COLORS.accent, fontSize: 11, fontFamily: "Courier New", letterSpacing: 1, fontWeight: "700" },
   scroll:           { padding: 16, paddingTop: 0 },
   entryCard:        { flexDirection: "row", backgroundColor: COLORS.surface, borderWidth: 1, borderColor: COLORS.border, borderRadius: RADIUS.md, padding: 12, marginBottom: 10, gap: 12 },
   entryThumb:       { width: 72, height: 72, borderRadius: RADIUS.sm },
