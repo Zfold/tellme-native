@@ -4,8 +4,22 @@ import * as FileSystem from "expo-file-system/legacy";
 
 // Convert a local image URI to base64 for embedding in HTML
 const imageToBase64 = async (uri) => {
- 
-  return null;
+  try {
+    if (!uri) return null;
+    let fileUri = uri;
+    if (!uri.startsWith("file://")) {
+      const filename = `tellme_img_${Date.now()}.jpg`;
+      fileUri = `${FileSystem.cacheDirectory}${filename}`;
+      await FileSystem.copyAsync({ from: uri, to: fileUri });
+    }
+    const base64 = await FileSystem.readAsStringAsync(fileUri, {
+      encoding: FileSystem.EncodingType.Base64,
+    });
+    return `data:image/jpeg;base64,${base64}`;
+  } catch (e) {
+    console.warn("Image load failed:", e.message);
+    return null;
+  }
 };
 
 // ── MAIN EXPORT FUNCTION ──────────────────────────────────────────────────────
@@ -31,7 +45,7 @@ export const exportCollectionPDF = async (collection, entries) => {
     year: "numeric",
   });
 
-  // Build HTML with PRINT-FRIENDLY light theme
+  // Build HTML with print-friendly light theme
   let html = `
     <!DOCTYPE html>
     <html>
