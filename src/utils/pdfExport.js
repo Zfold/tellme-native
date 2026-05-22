@@ -2,26 +2,6 @@ import * as Print from "expo-print";
 import * as Sharing from "expo-sharing";
 import * as FileSystem from "expo-file-system/legacy";
 
-// Convert a local image URI to base64 for embedding in HTML
-const imageToBase64 = async (uri) => {
-  try {
-    if (!uri) return null;
-    let fileUri = uri;
-    if (!uri.startsWith("file://")) {
-      const filename = `tellme_img_${Date.now()}.jpg`;
-      fileUri = `${FileSystem.cacheDirectory}${filename}`;
-      await FileSystem.copyAsync({ from: uri, to: fileUri });
-    }
-    const base64 = await FileSystem.readAsStringAsync(fileUri, {
-      encoding: FileSystem.EncodingType.Base64,
-    });
-    return `data:image/jpeg;base64,${base64}`;
-  } catch (e) {
-    console.warn("Image load failed:", e.message);
-    return null;
-  }
-};
-
 // ── MAIN EXPORT FUNCTION ──────────────────────────────────────────────────────
 export const exportCollectionPDF = async (collection, entries) => {
   const collEntries = entries.filter(e =>
@@ -30,13 +10,6 @@ export const exportCollectionPDF = async (collection, entries) => {
 
   if (collEntries.length === 0) {
     throw new Error("No entries in this collection to export.");
-  }
-
-  // Convert all images to base64
-  const imageData = [];
-  for (const entry of collEntries) {
-    const b64 = await imageToBase64(entry.imageUri);
-    imageData.push(b64);
   }
 
   const date = new Date().toLocaleDateString("en-US", {
@@ -110,6 +83,17 @@ export const exportCollectionPDF = async (collection, entries) => {
         .clean-photo {
           width: 100%;
           border-radius: 8px;
+          margin-bottom: 14px;
+        }
+
+        .no-image {
+          background: #f5f5f5;
+          border: 1px solid #e0e0e0;
+          border-radius: 8px;
+          padding: 30px;
+          text-align: center;
+          color: #999;
+          font-style: italic;
           margin-bottom: 14px;
         }
 
@@ -193,9 +177,10 @@ export const exportCollectionPDF = async (collection, entries) => {
   // Add each entry
   for (let i = 0; i < collEntries.length; i++) {
     const entry = collEntries[i];
-    const b64 = imageData[i];
     const r = entry.result || {};
     const conf = r.confidence || 0;
+    const b64 = entry.imageBase64 || null;
+    const imgSrc = b64 ? `data:image/jpeg;base64,${b64}` : null;
 
     const entryDate = new Date(entry.savedAt).toLocaleDateString("en-US", {
       weekday: "long", month: "long", day: "numeric", year: "numeric",
@@ -203,11 +188,11 @@ export const exportCollectionPDF = async (collection, entries) => {
 
     html += `<div class="entry">`;
 
-    // Hero overlay image
-    if (b64) {
+    if (imgSrc) {
+      // Hero overlay image
       html += `
         <div class="hero-wrap">
-          <img class="hero-img" src="${b64}" />
+          <img class="hero-img" src="${imgSrc}" />
           <div class="hero-overlay">
             <div class="hero-subject">${r.subject || "Unknown"}</div>
             <div class="hero-tagline">${r.tagline || ""}</div>
@@ -216,7 +201,10 @@ export const exportCollectionPDF = async (collection, entries) => {
         </div>`;
 
       // Clean standalone photo
-      html += `<img class="clean-photo" src="${b64}" />`;
+      html += `<img class="clean-photo" src="${imgSrc}" />`;
+    } else {
+      // No image available — show placeholder
+      html += `<div class="no-image">📷 Image not available for PDF export.<br/>Save new entries to include images.</div>`;
     }
 
     // Date and location
