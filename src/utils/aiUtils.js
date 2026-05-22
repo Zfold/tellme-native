@@ -171,7 +171,8 @@ export const buildVisionContext = (visionResult) => {
       .slice(0, 5)
       .map(l => `${l.description} (${Math.round(l.score * 100)}%)`)
       .join(", ");
-    if (topLabels) lines.push(`\nVISUAL CLASSIFICATION LABELS: ${topLabels}`);
+    if (topLabels) lines.push(`\nVISUAL CLASSIFICATION LABELS (low reliability — shape/color only): ${topLabels}`);
+    lines.push("WARNING: These are generic visual labels only. Do NOT treat these as specific identifications.");
   } else if (hasStrongSignal && labels.length > 0) {
     const supporting = labels.filter(l => l.score > 0.8).slice(0, 3).map(l => l.description).join(", ");
     if (supporting) lines.push(`\nSupporting visual context: ${supporting}`);
@@ -179,15 +180,23 @@ export const buildVisionContext = (visionResult) => {
 
   if (lines.length === 0) return null;
 
-  lines.push("\n── IDENTIFICATION INSTRUCTIONS ──");
+  lines.push("\n── EVIDENCE SUMMARY AND CONFIDENCE CAP ──");
   if (detectedText && bestGuesses.length > 0) {
-    lines.push("CONFIDENCE: VERY HIGH — text detected plus web match. Prioritize over shape-based labels.");
+    lines.push("EVIDENCE LEVEL: STRONG — text detected in image plus web reverse image match.");
+    lines.push("CONFIDENCE RANGE: 85-98% appropriate if text and web result agree.");
+  } else if (detectedText) {
+    lines.push("EVIDENCE LEVEL: GOOD — text detected in image but no web confirmation.");
+    lines.push("CONFIDENCE RANGE: 75-90% appropriate. Read the text carefully.");
   } else if (bestGuesses.length > 0 || fullMatches.length > 0) {
-    lines.push("CONFIDENCE: HIGH — web reverse image match. Do NOT let generic labels override this.");
+    lines.push("EVIDENCE LEVEL: GOOD — web reverse image match available.");
+    lines.push("CONFIDENCE RANGE: 75-92% appropriate. Do NOT let generic labels override the web result.");
   } else if (webEntities.length > 0) {
-    lines.push("CONFIDENCE: MODERATE — named web entities available. Use as primary signal.");
+    lines.push("EVIDENCE LEVEL: MODERATE — named web entities but no exact match.");
+    lines.push("CONFIDENCE RANGE: 60-80% appropriate. Use web entities as primary signal.");
   } else {
-    lines.push("CONFIDENCE: LOW — no web matches. Identify from visual evidence only. Be honest about uncertainty.");
+    lines.push("EVIDENCE LEVEL: WEAK — no web matches, no text detected. Only visual labels available.");
+    lines.push("CONFIDENCE CAP: Do NOT exceed 70%. Be explicit about uncertainty in confidenceNote.");
+    lines.push("State clearly: 'Identification based on visual appearance only — no web confirmation available.'");
   }
 
   return lines.join("\n");
@@ -262,18 +271,17 @@ export const quickSubjectCheck = async (base64, mime = "image/jpeg") => {
 
 // ── IMAGE TRIAGE ──────────────────────────────────────────────────────────────
 export const triageImage = async (base64, mime, coords, exifPresent) => {
+  // No EXIF — Vision required
   if (!exifPresent) {
     return { useVision: true, route: "no_exif", nearbyLandmark: null };
   }
+  // GPS matches known landmark — only case where we skip Vision
   const nearbyLandmark = findNearbyLandmark(coords);
   if (nearbyLandmark) {
     return { useVision: false, route: "landmark_confirmed", nearbyLandmark };
   }
-  const isNature = await quickSubjectCheck(base64, mime);
-  if (isNature) {
-    return { useVision: true, route: "nature_with_gps", nearbyLandmark: null };
-  }
-  return { useVision: false, route: "non_nature_with_gps", nearbyLandmark: null };
+  // All other cases — always use Vision for best accuracy
+  return { useVision: true, route: "vision_with_gps", nearbyLandmark: null };
 };
 
 // ── CALL CLAUDE — via Railway backend ─────────────────────────────────────────
