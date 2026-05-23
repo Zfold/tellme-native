@@ -88,7 +88,7 @@ export default function WelcomeScreen({ onComplete }) {
           <Text style={styles.startBtnText}>Start Exploring</Text>
         </TouchableOpacity>
 
-        <Text style={styles.freeNote}>10 free scans per day · No account required</Text>
+        <Text style={styles.freeNote}>100 free scans per day · No account required</Text>
       </ScrollView>
     </SafeAreaView>
   );

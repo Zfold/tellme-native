@@ -33,7 +33,7 @@ export default function HomeScreen({ navigation }) {
         setSettings(s);
         const entries = await loadEntries();
         setRecentEntries(entries.slice(0, 3));
-        const limit = await checkScanLimit(s.isPremium);
+        const limit = await checkScanLimit(s.isPremium, FREE_SCANS_PER_DAY);
         setScanInfo(limit);
       })();
     }, [])
@@ -48,7 +48,7 @@ export default function HomeScreen({ navigation }) {
   const pickImage = async (useCamera) => {
     try {
       // Check scan limit
-      const limit = await checkScanLimit(settings.isPremium);
+      const limit = await checkScanLimit(settings.isPremium, FREE_SCANS_PER_DAY);
       if (!limit.allowed) {
         Alert.alert(
           "Daily Limit Reached",

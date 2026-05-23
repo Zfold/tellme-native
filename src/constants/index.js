@@ -1,8 +1,8 @@
 // ── API KEYS ──────────────────────────────────────────────────────────────────
 // Keys stored locally only — never committed to GitHub (see .gitignore)
 // Phase 3: These move to Railway backend — app will call your server instead
-export const ANTHROPIC_KEY = process.env.ANTHROPIC_KEY || "";
-export const GOOGLE_VISION_KEY = process.env.GOOGLE_VISION_KEY || "";
+export const ANTHROPIC_KEY = "PASTE_YOUR_ANTHROPIC_KEY_HERE";
+export const GOOGLE_VISION_KEY = "PASTE_YOUR_GOOGLE_VISION_KEY_HERE";
 
 // ── API ENDPOINTS ─────────────────────────────────────────────────────────────
 export const ANTHROPIC_URL = "https://api.anthropic.com/v1/messages";
@@ -14,7 +14,7 @@ export const CLAUDE_MODEL = "claude-haiku-4-5-20251001";
 export const CLAUDE_MAX_TOKENS = 4096;
 
 // ── FREEMIUM LIMITS ───────────────────────────────────────────────────────────
-export const FREE_SCANS_PER_DAY = 9999;
+export const FREE_SCANS_PER_DAY = 100;
 export const FREE_FOLLOWUPS_PER_SCAN = 3;
 export const MAX_IMAGE_BYTES = 4 * 1024 * 1024;
 

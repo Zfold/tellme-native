@@ -150,7 +150,7 @@ export const incrementScanCount = async () => {
   return updated;
 };
 
-export const checkScanLimit = async (isPremium, freeLimit = 10) => {
+export const checkScanLimit = async (isPremium, freeLimit = 100) => {
   if (isPremium) return { allowed: true, remaining: Infinity };
   const { count } = await getScanCount();
   return {
