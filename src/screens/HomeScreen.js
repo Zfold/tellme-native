@@ -266,7 +266,7 @@ export default function HomeScreen({ navigation }) {
               <Text style={styles.secondaryBtnText}>Choose from Gallery</Text>
             </TouchableOpacity>
             <Text style={styles.hint}>
-              Landmarks · Nature · Art · Food · Anything
+              Landmarks · Wildlife · Plants · Art · Food · Culture
             </Text>
           </View>
         )}

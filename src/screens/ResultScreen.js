@@ -244,7 +244,6 @@ export default function ResultScreen({ navigation, route }) {
         id: Date.now(),
         savedAt: new Date().toISOString(),
         imageUri,
-        imageBase64: compressedBase64,
         result: activeResult,
         location,
         collections: selectedCollections,
@@ -366,8 +365,8 @@ export default function ResultScreen({ navigation, route }) {
               <Text style={styles.triageBadge}>
                 {triageRoute === "landmark_confirmed" ? "📍 GPS LANDMARK CONFIRMED" :
                  triageRoute === "no_exif" ? "🔍 VISION ANALYSIS — NO LOCATION DATA" :
-                 triageRoute === "nature_with_gps" ? "🔍 VISION ANALYSIS — NATURE SUBJECT" :
-                 "⚡ DIRECT ANALYSIS — LOCATION CONTEXT"}
+                 triageRoute === "vision_with_gps" ? "🔍 VISION ANALYSIS — WITH LOCATION" :
+                 "🔍 VISION ANALYSIS"}
               </Text>
             )}
 
@@ -494,6 +493,15 @@ export default function ResultScreen({ navigation, route }) {
               </TouchableOpacity>
             )}
 
+            {/* Tip for mundane objects */}
+            {activeResult.richDetail === false && (
+              <View style={styles.tipBox}>
+                <Text style={styles.tipText}>
+                  💡 Tell ME works best with landmarks, nature, art, and food. Try pointing at something you're curious about!
+                </Text>
+              </View>
+            )}
+
             <View style={{ height: 40 }} />
           </View>
         </ScrollView>
@@ -581,6 +589,8 @@ const styles = StyleSheet.create({
   chatLimitText:    { color: COLORS.textMuted, fontSize: 12, fontStyle: "italic", textAlign: "center" },
   openChatBtn:      { borderWidth: 1, borderColor: COLORS.accentBorder, borderRadius: RADIUS.md, padding: 14, alignItems: "center", backgroundColor: COLORS.accentDim, marginBottom: 8 },
   openChatText:     { color: COLORS.accent, fontSize: 15, fontWeight: "600" },
+  tipBox:           { backgroundColor: "rgba(255,255,255,0.04)", borderWidth: 1, borderColor: COLORS.border, borderRadius: RADIUS.md, padding: 14, marginBottom: 12 },
+  tipText:          { color: COLORS.textMuted, fontSize: 12, fontStyle: "italic", textAlign: "center", lineHeight: 18 },
   modalOverlay:     { flex: 1, backgroundColor: "rgba(0,0,0,0.85)", justifyContent: "flex-end" },
   modalSheet:       { backgroundColor: "#1A1714", borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 24, paddingBottom: 40 },
   modalHandle:      { width: 40, height: 4, backgroundColor: "rgba(255,255,255,0.15)", borderRadius: 2, alignSelf: "center", marginBottom: 20 },
