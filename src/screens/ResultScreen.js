@@ -244,6 +244,7 @@ export default function ResultScreen({ navigation, route }) {
         id: Date.now(),
         savedAt: new Date().toISOString(),
         imageUri,
+        imageBase64: compressedBase64,
         result: activeResult,
         location,
         collections: selectedCollections,
