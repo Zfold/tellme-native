@@ -38,15 +38,56 @@ export default function CollectionScreen({ navigation, route }) {
   );
   const [confirmDelete, setConfirmDelete] = useState(null);
   const [sharing, setSharing] = useState(false);
+  const [selectMode, setSelectMode] = useState(false);
+  const [selected, setSelected] = useState(new Set());
 
-  const handleShare = async () => {
+  const handleShareStart = () => {
+    setSelectMode(true);
+    setSelected(new Set());
+  };
+
+  const handleShareCancel = () => {
+    setSelectMode(false);
+    setSelected(new Set());
+  };
+
+  const toggleSelect = (id) => {
+    setSelected(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const selectAll = () => {
+    if (selected.size === entries.length) {
+      setSelected(new Set());
+    } else {
+      setSelected(new Set(entries.map(e => e.id)));
+    }
+  };
+
+  const handleShareSelected = async () => {
+    if (selected.size === 0) {
+      Alert.alert("No entries selected", "Select at least one entry to share.");
+      return;
+    }
     setSharing(true);
     try {
-      await exportCollectionPDF(collection, route.params.entries || []);
+      const selectedEntries = entries.filter(e => selected.has(e.id));
+      // Create a temporary entries list that only includes selected items
+      // but tagged with the collection name so exportCollectionPDF finds them
+      await exportCollectionPDF(collection, selectedEntries.map(e => ({
+        ...e,
+        collections: [collection.name],
+      })));
     } catch (e) {
       Alert.alert("Export Error", e.message || "Could not generate PDF.");
     }
     setSharing(false);
+    setSelectMode(false);
+    setSelected(new Set());
   };
 
   const handleDeleteEntry = (entry) => {
@@ -72,28 +113,56 @@ export default function CollectionScreen({ navigation, route }) {
   return (
     <SafeAreaView style={styles.container} edges={["top"]}>
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
-          <Text style={styles.backText}>← JOURNAL</Text>
+        <TouchableOpacity onPress={() => { if (selectMode) { handleShareCancel(); } else { navigation.goBack(); }}} style={styles.backBtn}>
+          <Text style={styles.backText}>{selectMode ? "← CANCEL" : "← JOURNAL"}</Text>
         </TouchableOpacity>
         <View style={styles.headerRow}>
           <View style={styles.headerRight}>
             <Text style={styles.collIcon}>{collection.icon || "📁"}</Text>
             <View>
               <Text style={styles.title}>{collection.name}</Text>
-              <Text style={styles.subtitle}>{entries.length} {entries.length === 1 ? "entry" : "entries"}</Text>
+              <Text style={styles.subtitle}>
+                {selectMode
+                  ? `${selected.size} of ${entries.length} selected`
+                  : `${entries.length} ${entries.length === 1 ? "entry" : "entries"}`
+                }
+              </Text>
             </View>
           </View>
-          {entries.length > 0 && (
-            <TouchableOpacity style={styles.shareBtn} onPress={handleShare} disabled={sharing}>
-              {sharing ? (
-                <ActivityIndicator color={COLORS.accent} size="small" />
-              ) : (
-                <Text style={styles.shareBtnText}>📤 SHARE</Text>
-              )}
+          {entries.length > 0 && !selectMode && (
+            <TouchableOpacity style={styles.shareBtn} onPress={handleShareStart}>
+              <Text style={styles.shareBtnText}>📤 SHARE</Text>
             </TouchableOpacity>
           )}
         </View>
       </View>
+
+      {/* Selection toolbar */}
+      {selectMode && (
+        <View style={styles.selectToolbar}>
+          <TouchableOpacity style={styles.selectAllBtn} onPress={selectAll}>
+            <View style={[styles.checkbox, selected.size === entries.length && styles.checkboxSelected]}>
+              {selected.size === entries.length && <Text style={styles.checkmark}>✓</Text>}
+            </View>
+            <Text style={styles.selectAllText}>
+              {selected.size === entries.length ? "Deselect All" : "Select All"}
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.shareSelectedBtn, selected.size === 0 && styles.shareSelectedBtnDisabled]}
+            onPress={handleShareSelected}
+            disabled={sharing || selected.size === 0}
+          >
+            {sharing ? (
+              <ActivityIndicator color={COLORS.bg} size="small" />
+            ) : (
+              <Text style={styles.shareSelectedText}>
+                Share {selected.size > 0 ? `(${selected.size})` : ""}
+              </Text>
+            )}
+          </TouchableOpacity>
+        </View>
+      )}
 
       <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
         {entries.length === 0 ? (
@@ -105,10 +174,21 @@ export default function CollectionScreen({ navigation, route }) {
           entries.map(entry => (
             <TouchableOpacity
               key={entry.id}
-              style={styles.entryCard}
-              onPress={() => navigation.navigate("Entry", { entry })}
+              style={[styles.entryCard, selectMode && selected.has(entry.id) && styles.entryCardSelected]}
+              onPress={() => {
+                if (selectMode) {
+                  toggleSelect(entry.id);
+                } else {
+                  navigation.navigate("Entry", { entry });
+                }
+              }}
               activeOpacity={0.8}
             >
+              {selectMode && (
+                <View style={[styles.entryCheckbox, selected.has(entry.id) && styles.entryCheckboxSelected]}>
+                  {selected.has(entry.id) && <Text style={styles.entryCheckmark}>✓</Text>}
+                </View>
+              )}
               <Image source={{ uri: entry.imageUri }} style={styles.entryThumb} resizeMode="cover" />
               <View style={styles.entryContent}>
                 <Text style={styles.entrySubject} numberOfLines={1}>{entry.result?.subject}</Text>
@@ -122,9 +202,11 @@ export default function CollectionScreen({ navigation, route }) {
                   )}
                 </View>
               </View>
-              <TouchableOpacity style={styles.deleteBtn} onPress={() => handleDeleteEntry(entry)}>
-                <Text style={styles.deleteIcon}>🗑</Text>
-              </TouchableOpacity>
+              {!selectMode && (
+                <TouchableOpacity style={styles.deleteBtn} onPress={() => handleDeleteEntry(entry)}>
+                  <Text style={styles.deleteIcon}>🗑</Text>
+                </TouchableOpacity>
+              )}
             </TouchableOpacity>
           ))
         )}
@@ -156,8 +238,21 @@ const styles = StyleSheet.create({
   subtitle:         { color: COLORS.textMuted, fontSize: 12, fontStyle: "italic", marginTop: 2 },
   shareBtn:         { backgroundColor: COLORS.accentDim, borderWidth: 1, borderColor: COLORS.accentBorder, borderRadius: RADIUS.md, paddingVertical: 10, paddingHorizontal: 16 },
   shareBtnText:     { color: COLORS.accent, fontSize: 11, fontFamily: "Courier New", letterSpacing: 1, fontWeight: "700" },
+  selectToolbar:    { flexDirection: "row", justifyContent: "space-between", alignItems: "center", paddingHorizontal: 20, paddingVertical: 10, backgroundColor: COLORS.surface, borderBottomWidth: 1, borderBottomColor: COLORS.border },
+  selectAllBtn:     { flexDirection: "row", alignItems: "center", gap: 8 },
+  selectAllText:    { color: COLORS.textSecondary, fontSize: 13 },
+  checkbox:         { width: 22, height: 22, borderRadius: 6, borderWidth: 2, borderColor: "rgba(255,255,255,0.2)", alignItems: "center", justifyContent: "center" },
+  checkboxSelected: { backgroundColor: COLORS.accent, borderColor: COLORS.accent },
+  checkmark:        { color: COLORS.bg, fontSize: 13, fontWeight: "700" },
+  shareSelectedBtn: { backgroundColor: COLORS.accent, borderRadius: RADIUS.md, paddingVertical: 8, paddingHorizontal: 16, minWidth: 90, alignItems: "center" },
+  shareSelectedBtnDisabled: { backgroundColor: "rgba(232,197,71,0.3)" },
+  shareSelectedText:{ color: COLORS.bg, fontSize: 13, fontWeight: "700" },
   scroll:           { padding: 16, paddingTop: 0 },
-  entryCard:        { flexDirection: "row", backgroundColor: COLORS.surface, borderWidth: 1, borderColor: COLORS.border, borderRadius: RADIUS.md, padding: 12, marginBottom: 10, gap: 12 },
+  entryCard:        { flexDirection: "row", backgroundColor: COLORS.surface, borderWidth: 1, borderColor: COLORS.border, borderRadius: RADIUS.md, padding: 12, marginBottom: 10, gap: 12, alignItems: "center" },
+  entryCardSelected:{ borderColor: COLORS.accent, backgroundColor: COLORS.accentDim },
+  entryCheckbox:    { width: 24, height: 24, borderRadius: 6, borderWidth: 2, borderColor: "rgba(255,255,255,0.2)", alignItems: "center", justifyContent: "center" },
+  entryCheckboxSelected: { backgroundColor: COLORS.accent, borderColor: COLORS.accent },
+  entryCheckmark:   { color: COLORS.bg, fontSize: 14, fontWeight: "700" },
   entryThumb:       { width: 72, height: 72, borderRadius: RADIUS.sm },
   entryContent:     { flex: 1 },
   entrySubject:     { color: COLORS.white, fontSize: 15, fontWeight: "600", marginBottom: 3 },
