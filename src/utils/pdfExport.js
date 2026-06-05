@@ -1,6 +1,7 @@
 import * as Print from "expo-print";
 import * as Sharing from "expo-sharing";
 import * as FileSystem from "expo-file-system/legacy";
+import { loadImageBase64 } from "./storage";
 
 // ── MAIN EXPORT FUNCTION ──────────────────────────────────────────────────────
 export const exportCollectionPDF = async (collection, entries) => {
@@ -179,7 +180,8 @@ export const exportCollectionPDF = async (collection, entries) => {
     const entry = collEntries[i];
     const r = entry.result || {};
     const conf = r.confidence || 0;
-    const b64 = entry.imageBase64 || null;
+    // Load image from separate storage
+    const b64 = await loadImageBase64(entry.id);
     const imgSrc = b64 ? `data:image/jpeg;base64,${b64}` : null;
 
     const entryDate = new Date(entry.savedAt).toLocaleDateString("en-US", {

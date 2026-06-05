@@ -7,6 +7,35 @@ const KEYS = {
   scanCount:   "tellme_scan_count",
 };
 
+// Image base64 stored separately to avoid AsyncStorage size limits
+const IMAGE_KEY_PREFIX = "tellme_img_";
+
+// ── IMAGE STORAGE (separate from entries) ─────────────────────────────────────
+export const saveImageBase64 = async (entryId, base64) => {
+  try {
+    if (!base64) return;
+    await AsyncStorage.setItem(`${IMAGE_KEY_PREFIX}${entryId}`, base64);
+  } catch (e) {
+    console.warn("Failed to save image base64:", e.message);
+  }
+};
+
+export const loadImageBase64 = async (entryId) => {
+  try {
+    return await AsyncStorage.getItem(`${IMAGE_KEY_PREFIX}${entryId}`);
+  } catch {
+    return null;
+  }
+};
+
+export const deleteImageBase64 = async (entryId) => {
+  try {
+    await AsyncStorage.removeItem(`${IMAGE_KEY_PREFIX}${entryId}`);
+  } catch {
+    // ignore
+  }
+};
+
 // ── JOURNAL ENTRIES ───────────────────────────────────────────────────────────
 export const loadEntries = async () => {
   try {
@@ -19,15 +48,25 @@ export const loadEntries = async () => {
 
 export const saveEntries = async (entries) => {
   try {
-    await AsyncStorage.setItem(KEYS.entries, JSON.stringify(entries));
+    // Strip imageBase64 from entries before saving — stored separately
+    const cleaned = entries.map(e => {
+      const { imageBase64, ...rest } = e;
+      return rest;
+    });
+    await AsyncStorage.setItem(KEYS.entries, JSON.stringify(cleaned));
   } catch (e) {
     console.error("Failed to save entries:", e);
   }
 };
 
 export const addEntry = async (entry) => {
+  // Save image separately if present
+  if (entry.imageBase64) {
+    await saveImageBase64(entry.id, entry.imageBase64);
+  }
   const entries = await loadEntries();
-  const updated = [entry, ...entries];
+  const { imageBase64, ...entryWithoutImage } = entry;
+  const updated = [entryWithoutImage, ...entries];
   await saveEntries(updated);
   return updated;
 };
@@ -36,6 +75,8 @@ export const deleteEntry = async (id) => {
   const entries = await loadEntries();
   const updated = entries.filter(e => e.id !== id);
   await saveEntries(updated);
+  // Delete the associated image
+  await deleteImageBase64(id);
   // Clean up orphaned collections
   const collections = await loadCollections();
   const usedNames = new Set(updated.flatMap(e => e.collections || []));
@@ -63,7 +104,6 @@ export const saveCollections = async (collections) => {
 };
 
 export const deleteCollection = async (name) => {
-  // Remove collection but keep entries — just strip the collection tag
   const entries = await loadEntries();
   const updatedEntries = entries.map(e => ({
     ...e,
@@ -78,17 +118,21 @@ export const deleteCollection = async (name) => {
 
 // ── SAVE TO JOURNAL WITH COLLECTIONS ─────────────────────────────────────────
 export const saveToJournal = async (entry, selectedCollections, existingCollections) => {
-  // Add entry
-  const newEntry = { ...entry, collections: selectedCollections };
+  // Save image separately
+  if (entry.imageBase64) {
+    await saveImageBase64(entry.id, entry.imageBase64);
+  }
+  // Save entry without image data
+  const { imageBase64, ...entryWithoutImage } = entry;
+  const newEntry = { ...entryWithoutImage, collections: selectedCollections };
   const entries = await loadEntries();
   const updatedEntries = [newEntry, ...entries];
   await saveEntries(updatedEntries);
 
-  // Update collections — create any new ones
+  // Update collections
   let collections = [...existingCollections];
   for (const name of selectedCollections) {
     if (!collections.find(c => c.name === name)) {
-      // Determine icon from entry subject category
       const { CATEGORY_ICONS } = await import("../constants");
       const icon = CATEGORY_ICONS[entry.result?.subjectCategory] || "📁";
       collections.unshift({
@@ -130,7 +174,6 @@ export const getScanCount = async () => {
     const raw = await AsyncStorage.getItem(KEYS.scanCount);
     if (!raw) return { count: 0, date: new Date().toDateString() };
     const data = JSON.parse(raw);
-    // Reset if it's a new day
     if (data.date !== new Date().toDateString()) {
       return { count: 0, date: new Date().toDateString() };
     }
@@ -163,7 +206,14 @@ export const checkScanLimit = async (isPremium, freeLimit = 100) => {
 // ── CLEAR ALL DATA ────────────────────────────────────────────────────────────
 export const clearAllData = async () => {
   try {
+    // Clear main keys
     await AsyncStorage.multiRemove(Object.values(KEYS));
+    // Clear all image keys
+    const allKeys = await AsyncStorage.getAllKeys();
+    const imageKeys = allKeys.filter(k => k.startsWith(IMAGE_KEY_PREFIX));
+    if (imageKeys.length > 0) {
+      await AsyncStorage.multiRemove(imageKeys);
+    }
   } catch (e) {
     console.error("Failed to clear data:", e);
   }
