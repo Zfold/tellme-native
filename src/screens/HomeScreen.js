@@ -165,7 +165,7 @@ export default function HomeScreen({ navigation }) {
           { type: "text", text: "Analyze this image and respond with the JSON." },
         ],
       }];
-      const raw = await callClaude(messages, buildPrompt(locationContext, visionContext));
+      const raw = await callClaude(messages, null, locationContext, visionContext);
       const parsed = JSON.parse(extractAndRepairJSON(raw));
 
       // Step 6 — Increment scan count

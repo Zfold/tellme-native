@@ -203,6 +203,33 @@ export const checkScanLimit = async (isPremium, freeLimit = 100) => {
   };
 };
 
+// ── UPDATE ENTRY COLLECTIONS ──────────────────────────────────────────────────
+export const updateEntryCollections = async (entryId, newCollections) => {
+  const entries = await loadEntries();
+  const updatedEntries = entries.map(e =>
+    e.id === entryId ? { ...e, collections: newCollections } : e
+  );
+  await saveEntries(updatedEntries);
+
+  // Ensure all new collection names exist
+  const collections = await loadCollections();
+  let updatedCollections = [...collections];
+  for (const name of newCollections) {
+    if (!updatedCollections.find(c => c.name === name)) {
+      updatedCollections.unshift({
+        name,
+        icon: "📁",
+        createdAt: new Date().toISOString(),
+      });
+    }
+  }
+  // Clean up orphaned collections
+  const allUsedNames = new Set(updatedEntries.flatMap(e => e.collections || []));
+  updatedCollections = updatedCollections.filter(c => allUsedNames.has(c.name));
+  await saveCollections(updatedCollections);
+  return { entries: updatedEntries, collections: updatedCollections };
+};
+
 // ── CLEAR ALL DATA ────────────────────────────────────────────────────────────
 export const clearAllData = async () => {
   try {

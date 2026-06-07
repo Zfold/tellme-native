@@ -1,11 +1,11 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
-  Image, Modal, Alert,
+  Image, Modal, Alert, TextInput,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { COLORS, RADIUS } from "../constants";
-import { deleteEntry } from "../utils/storage";
+import { deleteEntry, loadCollections, updateEntryCollections } from "../utils/storage";
 
 function ConfirmModal({ onConfirm, onCancel, subject }) {
   return (
@@ -30,11 +30,107 @@ function ConfirmModal({ onConfirm, onCancel, subject }) {
   );
 }
 
+function EditCollectionsModal({ entry, onSave, onCancel }) {
+  const [allCollections, setAllCollections] = useState([]);
+  const [selected, setSelected] = useState(new Set(entry.collections || []));
+  const [customName, setCustomName] = useState("");
+  const [showCustom, setShowCustom] = useState(false);
+
+  useEffect(() => {
+    loadCollections().then(c => setAllCollections(c));
+  }, []);
+
+  const toggleCollection = (name) => {
+    setSelected(prev => {
+      const next = new Set(prev);
+      if (next.has(name)) next.delete(name);
+      else next.add(name);
+      return next;
+    });
+  };
+
+  const addCustom = () => {
+    const name = customName.trim();
+    if (!name) return;
+    if (!allCollections.find(c => c.name === name)) {
+      setAllCollections(prev => [...prev, { name, icon: "📁" }]);
+    }
+    setSelected(prev => new Set(prev).add(name));
+    setCustomName("");
+    setShowCustom(false);
+  };
+
+  const handleSave = () => {
+    onSave(Array.from(selected));
+  };
+
+  return (
+    <Modal transparent animationType="fade" onRequestClose={onCancel}>
+      <View style={styles.editOverlay}>
+        <View style={styles.editBox}>
+          <Text style={styles.editTitle}>Edit Collections</Text>
+          <Text style={styles.editSubtitle}>Select which collections this entry belongs to</Text>
+
+          <ScrollView style={styles.editScroll} showsVerticalScrollIndicator={false}>
+            {allCollections.map(c => (
+              <TouchableOpacity
+                key={c.name}
+                style={[styles.editRow, selected.has(c.name) && styles.editRowSelected]}
+                onPress={() => toggleCollection(c.name)}
+              >
+                <View style={[styles.editCheckbox, selected.has(c.name) && styles.editCheckboxSelected]}>
+                  {selected.has(c.name) && <Text style={styles.editCheckmark}>✓</Text>}
+                </View>
+                <Text style={styles.editRowIcon}>{c.icon || "📁"}</Text>
+                <Text style={styles.editRowName}>{c.name}</Text>
+              </TouchableOpacity>
+            ))}
+          </ScrollView>
+
+          {showCustom ? (
+            <View style={styles.customRow}>
+              <TextInput
+                style={styles.customInput}
+                value={customName}
+                onChangeText={setCustomName}
+                placeholder="New collection name..."
+                placeholderTextColor="rgba(255,255,255,0.3)"
+                autoFocus
+                onSubmitEditing={addCustom}
+              />
+              <TouchableOpacity style={styles.customAddBtn} onPress={addCustom}>
+                <Text style={styles.customAddText}>Add</Text>
+              </TouchableOpacity>
+              <TouchableOpacity onPress={() => { setShowCustom(false); setCustomName(""); }}>
+                <Text style={styles.customCancelText}>Cancel</Text>
+              </TouchableOpacity>
+            </View>
+          ) : (
+            <TouchableOpacity style={styles.newCollBtn} onPress={() => setShowCustom(true)}>
+              <Text style={styles.newCollText}>+ New Collection</Text>
+            </TouchableOpacity>
+          )}
+
+          <View style={styles.editActions}>
+            <TouchableOpacity style={styles.editCancelBtn} onPress={onCancel}>
+              <Text style={styles.editCancelText}>Cancel</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.editSaveBtn} onPress={handleSave}>
+              <Text style={styles.editSaveText}>Save Changes</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </View>
+    </Modal>
+  );
+}
+
 export default function EntryScreen({ navigation, route }) {
-  const { entry } = route.params;
+  const [entry, setEntry] = useState(route.params.entry);
   const { result, imageUri, location, savedAt } = entry;
   const [showConfirm, setShowConfirm] = useState(false);
   const [viewingImage, setViewingImage] = useState(false);
+  const [showEditCollections, setShowEditCollections] = useState(false);
 
   const handleDelete = async () => {
     try {
@@ -44,6 +140,16 @@ export default function EntryScreen({ navigation, route }) {
       Alert.alert("Error", "Could not delete entry.");
     }
     setShowConfirm(false);
+  };
+
+  const handleSaveCollections = async (newCollections) => {
+    try {
+      await updateEntryCollections(entry.id, newCollections);
+      setEntry(prev => ({ ...prev, collections: newCollections }));
+      setShowEditCollections(false);
+    } catch (e) {
+      Alert.alert("Error", "Could not update collections.");
+    }
   };
 
   const date = new Date(savedAt).toLocaleDateString("en-US", {
@@ -87,16 +193,25 @@ export default function EntryScreen({ navigation, route }) {
             </View>
           )}
 
-          {/* Collections */}
-          {entry.collections?.length > 0 && (
-            <View style={styles.tags}>
-              {entry.collections.map(c => (
-                <View key={c} style={styles.tag}>
-                  <Text style={styles.tagText}>{c}</Text>
-                </View>
-              ))}
+          {/* Collections — tappable to edit */}
+          <TouchableOpacity onPress={() => setShowEditCollections(true)} activeOpacity={0.7}>
+            <View style={styles.collectionsRow}>
+              <View style={styles.tags}>
+                {entry.collections?.length > 0 ? (
+                  entry.collections.map(c => (
+                    <View key={c} style={styles.tag}>
+                      <Text style={styles.tagText}>{c}</Text>
+                    </View>
+                  ))
+                ) : (
+                  <View style={styles.tag}>
+                    <Text style={styles.tagText}>No collection</Text>
+                  </View>
+                )}
+              </View>
+              <Text style={styles.editCollText}>✏️ Edit</Text>
             </View>
-          )}
+          </TouchableOpacity>
 
           {/* Safety banner */}
           {result.safetyFlag && result.safetyNote && (
@@ -164,6 +279,14 @@ export default function EntryScreen({ navigation, route }) {
           onCancel={() => setShowConfirm(false)}
         />
       )}
+
+      {showEditCollections && (
+        <EditCollectionsModal
+          entry={entry}
+          onSave={handleSaveCollections}
+          onCancel={() => setShowEditCollections(false)}
+        />
+      )}
     </SafeAreaView>
   );
 }
@@ -186,9 +309,11 @@ const styles = StyleSheet.create({
   date:               { color: COLORS.textMuted, fontSize: 12, fontStyle: "italic", marginBottom: 10 },
   locationBadge:      { backgroundColor: COLORS.greenDim, borderRadius: RADIUS.full, paddingVertical: 4, paddingHorizontal: 12, alignSelf: "flex-start", marginBottom: 10 },
   locationText:       { color: COLORS.green, fontSize: 10, fontFamily: "Courier New" },
-  tags:               { flexDirection: "row", flexWrap: "wrap", gap: 6, marginBottom: 12 },
+  collectionsRow:     { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 12 },
+  tags:               { flexDirection: "row", flexWrap: "wrap", gap: 6, flex: 1 },
   tag:                { backgroundColor: COLORS.accentDim, borderRadius: RADIUS.full, paddingVertical: 3, paddingHorizontal: 10 },
   tagText:            { color: "rgba(232,197,71,0.7)", fontSize: 10, fontFamily: "Courier New" },
+  editCollText:       { color: COLORS.textMuted, fontSize: 12, marginLeft: 8 },
   safetyBanner:       { flexDirection: "row", gap: 10, backgroundColor: COLORS.redDim, borderWidth: 1, borderColor: COLORS.red, borderRadius: RADIUS.md, padding: 12, marginBottom: 12 },
   safetyIcon:         { fontSize: 20 },
   safetyLabel:        { color: COLORS.red, fontSize: 9, fontFamily: "Courier New", letterSpacing: 2, marginBottom: 3 },
@@ -211,6 +336,32 @@ const styles = StyleSheet.create({
   imageViewerImg:     { width: "100%", height: "80%" },
   imageViewerFooter:  { position: "absolute", bottom: 40, left: 20, right: 20 },
   imageViewerSubject: { color: COLORS.white, fontSize: 16, fontWeight: "700", textAlign: "center" },
+  // Edit Collections Modal
+  editOverlay:        { flex: 1, backgroundColor: "rgba(0,0,0,0.85)", justifyContent: "center", alignItems: "center", padding: 24 },
+  editBox:            { backgroundColor: "#1A1714", borderRadius: 20, padding: 24, width: "100%", maxHeight: "80%", borderWidth: 1, borderColor: COLORS.accentBorder },
+  editTitle:          { color: COLORS.white, fontSize: 20, fontWeight: "700", marginBottom: 4, textAlign: "center" },
+  editSubtitle:       { color: COLORS.textMuted, fontSize: 12, textAlign: "center", marginBottom: 16, fontStyle: "italic" },
+  editScroll:         { maxHeight: 250 },
+  editRow:            { flexDirection: "row", alignItems: "center", gap: 10, paddingVertical: 10, paddingHorizontal: 8, borderRadius: RADIUS.sm, marginBottom: 4 },
+  editRowSelected:    { backgroundColor: COLORS.accentDim },
+  editCheckbox:       { width: 22, height: 22, borderRadius: 6, borderWidth: 2, borderColor: "rgba(255,255,255,0.2)", alignItems: "center", justifyContent: "center" },
+  editCheckboxSelected: { backgroundColor: COLORS.accent, borderColor: COLORS.accent },
+  editCheckmark:      { color: COLORS.bg, fontSize: 13, fontWeight: "700" },
+  editRowIcon:        { fontSize: 18, width: 24, textAlign: "center" },
+  editRowName:        { color: COLORS.textPrimary, fontSize: 14, flex: 1 },
+  newCollBtn:         { borderWidth: 1, borderColor: COLORS.border, borderRadius: RADIUS.md, paddingVertical: 10, alignItems: "center", marginTop: 8 },
+  newCollText:        { color: COLORS.textMuted, fontSize: 13 },
+  customRow:          { flexDirection: "row", gap: 8, alignItems: "center", marginTop: 8 },
+  customInput:        { flex: 1, backgroundColor: COLORS.surface, borderWidth: 1, borderColor: COLORS.border, borderRadius: RADIUS.sm, padding: 8, color: COLORS.white, fontSize: 13 },
+  customAddBtn:       { backgroundColor: COLORS.accent, borderRadius: RADIUS.sm, paddingVertical: 8, paddingHorizontal: 12 },
+  customAddText:      { color: COLORS.bg, fontSize: 12, fontWeight: "700" },
+  customCancelText:   { color: COLORS.textMuted, fontSize: 12, padding: 8 },
+  editActions:        { flexDirection: "row", gap: 10, marginTop: 16 },
+  editCancelBtn:      { flex: 1, backgroundColor: "rgba(255,255,255,0.06)", borderRadius: RADIUS.md, padding: 14, alignItems: "center", borderWidth: 1, borderColor: COLORS.border },
+  editCancelText:     { color: COLORS.textSecondary, fontSize: 12, fontFamily: "Courier New" },
+  editSaveBtn:        { flex: 1, backgroundColor: COLORS.accent, borderRadius: RADIUS.md, padding: 14, alignItems: "center" },
+  editSaveText:       { color: COLORS.bg, fontSize: 12, fontFamily: "Courier New", fontWeight: "700" },
+  // Confirm Delete
   confirmOverlay:     { flex: 1, backgroundColor: "rgba(0,0,0,0.85)", justifyContent: "center", alignItems: "center", padding: 24 },
   confirmBox:         { backgroundColor: "#1A1714", borderRadius: 20, padding: 28, width: "100%", borderWidth: 1, borderColor: "rgba(235,87,87,0.3)", alignItems: "center" },
   confirmIcon:        { fontSize: 32, marginBottom: 12 },

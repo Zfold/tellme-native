@@ -218,7 +218,7 @@ NEVER let generic shape or color labels override a specific web identification.
 
 ${visionContext ? `GOOGLE VISION DATA:\n${visionContext}` : "No Google Vision data — identify from visual evidence only."}
 
-${locationContext ? `LOCATION CONTEXT:\n${locationContext}\n\nUse location as helpful context. Cultivated environments may have non-native species. Replicas exist far from originals. Imported food is global. Identify what you see — use location to add nuance, never to override visual evidence.` : "No location data available."}
+${locationContext ? `LOCATION CONTEXT:\n${locationContext}\n\nLOCATION INTELLIGENCE RULES:\n- ACTIVELY USE your knowledge of this location. If you know of famous parks, preserves, waterfalls, trails, monuments, or natural features near the GPS coordinates, consider them as likely identifications.\n- A waterfall photo taken at coordinates near Turkey Creek Nature Preserve should be identified as Turkey Creek Falls, not "mountain stream."\n- A rock formation near a well-known geological site should be named specifically.\n- Combine visual evidence WITH location knowledge for the best identification.\n- Cultivated environments may have non-native species. Replicas exist far from originals. Imported food is global.\n- Identify what you see — use location to ADD SPECIFICITY, never to override clear visual evidence.` : "No location data available."}
 
 Return this exact JSON:
 {
@@ -285,11 +285,16 @@ export const triageImage = async (base64, mime, coords, exifPresent) => {
 };
 
 // ── CALL CLAUDE — via Railway backend ─────────────────────────────────────────
-export const callClaude = async (messages, system) => {
+export const callClaude = async (messages, system, locationContext, visionContext) => {
   const res = await fetch(`${BACKEND_URL}/analyze`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ messages, system }),
+    body: JSON.stringify({
+      messages,
+      system: system || undefined,
+      locationContext: locationContext || undefined,
+      visionContext: visionContext || undefined,
+    }),
   });
   const data = await res.json();
   if (!res.ok) {
@@ -342,7 +347,10 @@ export const extractAndRepairJSON = (text) => {
 export const buildLocationContext = (locData) => {
   if (!locData) return null;
   const season = getCurrentSeason();
-  return `- Location: ${locData.full}\n- Season: ${season} (Northern Hemisphere)`;
+  return `- Location: ${locData.full}
+- GPS Coordinates: ${locData.lat?.toFixed(4)}, ${locData.lng?.toFixed(4)}
+- Season: ${season} (Northern Hemisphere)
+- IMPORTANT: Consider well-known parks, nature preserves, landmarks, trails, waterfalls, and points of interest in or near ${locData.city || locData.state || locData.country}. If the image shows a natural feature (waterfall, rock formation, scenic overlook, trail) and you know of a famous or notable natural area at this location, identify it specifically rather than generically.`;
 };
 
 // ── COLLECTION SUGGESTIONS ────────────────────────────────────────────────────
