@@ -258,13 +258,6 @@ export default function HomeScreen({ navigation }) {
               <Text style={styles.primaryBtnIcon}>📷</Text>
               <Text style={styles.primaryBtnText}>Take Photo</Text>
             </TouchableOpacity>
-            <TouchableOpacity
-              style={styles.secondaryBtn}
-              onPress={() => pickImage(false)}
-              activeOpacity={0.85}
-            >
-              <Text style={styles.secondaryBtnText}>Choose from Gallery</Text>
-            </TouchableOpacity>
             <Text style={styles.hint}>
               Landmarks · Wildlife · Plants · Art · Food · Culture
             </Text>
