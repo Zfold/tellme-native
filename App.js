@@ -4,7 +4,9 @@ import { createNativeStackNavigator } from "@react-navigation/native-stack";
 import { StatusBar } from "expo-status-bar";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { COLORS } from "./src/constants";
+import { supabase } from "./src/utils/supabase";
 
+import AuthScreen       from "./src/screens/AuthScreen";
 import WelcomeScreen    from "./src/screens/WelcomeScreen";
 import HomeScreen       from "./src/screens/HomeScreen";
 import ResultScreen     from "./src/screens/ResultScreen";
@@ -16,13 +18,34 @@ const Stack = createNativeStackNavigator();
 const WELCOME_KEY = "tellme_welcome_shown";
 
 export default function App() {
+  const [session, setSession] = useState(null);
+  const [authLoading, setAuthLoading] = useState(true);
   const [showWelcome, setShowWelcome] = useState(null);
 
+  // Listen for auth state changes
   useEffect(() => {
-    AsyncStorage.getItem(WELCOME_KEY).then(val => {
-      setShowWelcome(val !== "true");
+    // Get initial session
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setSession(session);
+      setAuthLoading(false);
     });
+
+    // Listen for changes (sign in, sign out, token refresh)
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      setSession(session);
+    });
+
+    return () => subscription.unsubscribe();
   }, []);
+
+  // Check welcome screen status after auth
+  useEffect(() => {
+    if (session) {
+      AsyncStorage.getItem(WELCOME_KEY).then(val => {
+        setShowWelcome(val !== "true");
+      });
+    }
+  }, [session]);
 
   const handleWelcomeComplete = async () => {
     await AsyncStorage.setItem(WELCOME_KEY, "true");
@@ -30,9 +53,20 @@ export default function App() {
   };
 
   // Loading state
-  if (showWelcome === null) return null;
+  if (authLoading) return null;
 
-  // First launch — show welcome
+  // Not signed in — show auth screen
+  if (!session) {
+    return (
+      <>
+        <StatusBar style="light" backgroundColor={COLORS.bg} />
+        <AuthScreen />
+      </>
+    );
+  }
+
+  // First launch after sign in — show welcome
+  if (showWelcome === null) return null;
   if (showWelcome) {
     return (
       <>
