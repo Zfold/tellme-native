@@ -1,4 +1,9 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import {
+  syncEntryToCloud, deleteEntryFromCloud,
+  updateEntryCollectionsCloud, deleteCollectionFromCloud,
+  pullFromCloud, syncScanCount,
+} from "./cloudSync";
 
 const KEYS = {
   entries:     "tellme_entries",
@@ -82,6 +87,8 @@ export const deleteEntry = async (id) => {
   const usedNames = new Set(updated.flatMap(e => e.collections || []));
   const updatedCollections = collections.filter(c => usedNames.has(c.name));
   await saveCollections(updatedCollections);
+  // Cloud sync (background)
+  deleteEntryFromCloud(id).catch(() => {});
   return { entries: updated, collections: updatedCollections };
 };
 
@@ -113,6 +120,8 @@ export const deleteCollection = async (name) => {
   const collections = await loadCollections();
   const updatedCollections = collections.filter(c => c.name !== name);
   await saveCollections(updatedCollections);
+  // Cloud sync (background)
+  deleteCollectionFromCloud(name).catch(() => {});
   return { entries: updatedEntries, collections: updatedCollections };
 };
 
@@ -144,6 +153,8 @@ export const saveToJournal = async (entry, selectedCollections, existingCollecti
     }
   }
   await saveCollections(collections);
+  // Cloud sync (background)
+  syncEntryToCloud(entry, selectedCollections).catch(() => {});
   return { entries: updatedEntries, collections };
 };
 
@@ -190,6 +201,8 @@ export const incrementScanCount = async () => {
     date: new Date().toDateString(),
   };
   await AsyncStorage.setItem(KEYS.scanCount, JSON.stringify(updated));
+  // Cloud sync (background)
+  syncScanCount(updated.count, updated.date).catch(() => {});
   return updated;
 };
 
@@ -201,6 +214,49 @@ export const checkScanLimit = async (isPremium, freeLimit = 100) => {
     remaining: Math.max(0, freeLimit - count),
     used: count,
   };
+};
+
+// ── SYNC FROM CLOUD (call on app launch) ──────────────────────────────────────
+export const syncFromCloud = async () => {
+  try {
+    const cloudData = await pullFromCloud();
+    if (!cloudData) return null;
+
+    const localEntries = await loadEntries();
+    const localCollections = await loadCollections();
+
+    // Build sets of local and cloud entry IDs
+    const localIds = new Set(localEntries.map(e => e.id));
+    const cloudIds = new Set(cloudData.entries.map(e => e.id));
+
+    // Merge: cloud is source of truth, but keep local-only entries (unssynced)
+    const merged = [...cloudData.entries];
+    for (const local of localEntries) {
+      if (!cloudIds.has(local.id)) {
+        // Local entry not in cloud — sync it up
+        merged.push(local);
+        syncEntryToCloud(local, local.collections || []).catch(() => {});
+      }
+    }
+
+    // Merge collections
+    const collMap = new Map();
+    for (const c of cloudData.collections) collMap.set(c.name, c);
+    for (const c of localCollections) {
+      if (!collMap.has(c.name)) collMap.set(c.name, c);
+    }
+    const mergedCollections = Array.from(collMap.values());
+
+    // Save merged data locally
+    await saveEntries(merged);
+    await saveCollections(mergedCollections);
+
+    console.log(`Sync complete: ${merged.length} entries, ${mergedCollections.length} collections`);
+    return { entries: merged, collections: mergedCollections };
+  } catch (e) {
+    console.warn("Sync from cloud failed:", e.message);
+    return null;
+  }
 };
 
 // ── UPDATE ENTRY COLLECTIONS ──────────────────────────────────────────────────
@@ -227,6 +283,8 @@ export const updateEntryCollections = async (entryId, newCollections) => {
   const allUsedNames = new Set(updatedEntries.flatMap(e => e.collections || []));
   updatedCollections = updatedCollections.filter(c => allUsedNames.has(c.name));
   await saveCollections(updatedCollections);
+  // Cloud sync (background)
+  updateEntryCollectionsCloud(entryId, newCollections).catch(() => {});
   return { entries: updatedEntries, collections: updatedCollections };
 };
 

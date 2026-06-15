@@ -16,6 +16,7 @@ import {
 import {
   loadSettings, saveSettings, loadEntries,
   loadCollections, checkScanLimit, incrementScanCount,
+  syncFromCloud,
 } from "../utils/storage";
 
 export default function HomeScreen({ navigation }) {
@@ -35,6 +36,8 @@ export default function HomeScreen({ navigation }) {
         setRecentEntries(entries.slice(0, 3));
         const limit = await checkScanLimit(s.isPremium, FREE_SCANS_PER_DAY);
         setScanInfo(limit);
+        // Cloud sync in background (non-blocking)
+        syncFromCloud().catch(() => {});
       })();
     }, [])
   );
