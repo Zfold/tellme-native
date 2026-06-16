@@ -6,7 +6,14 @@ import { decode } from "base64-arraybuffer";
 const uploadImage = async (userId, entryId) => {
   try {
     const base64 = await loadImageBase64(entryId);
-    if (!base64) return null;
+    if (!base64) {
+      const { Alert } = require("react-native");
+      Alert.alert("Upload Debug", "No base64 found for entry " + entryId);
+      return null;
+    }
+
+    const { Alert } = require("react-native");
+    Alert.alert("Upload Debug", "Base64 loaded, length: " + base64.length + ". Uploading...");
 
     const fileName = `${userId}/${entryId}.jpg`;
     const { data, error } = await supabase.storage
@@ -17,13 +24,15 @@ const uploadImage = async (userId, entryId) => {
       });
 
     if (error) {
-      console.warn("Image upload failed:", error.message);
+      Alert.alert("Upload Error", error.message);
       return null;
     }
 
+    Alert.alert("Upload Success", "Image uploaded: " + fileName);
     return fileName;
   } catch (e) {
-    console.warn("Image upload exception:", e.message);
+    const { Alert } = require("react-native");
+    Alert.alert("Upload Exception", e.message);
     return null;
   }
 };
