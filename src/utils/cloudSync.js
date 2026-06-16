@@ -1,10 +1,59 @@
 import { supabase } from "./supabase";
+import { loadImageBase64 } from "./storage";
+
+// ── UPLOAD IMAGE TO SUPABASE STORAGE ─────────────────────────────────────────
+const uploadImage = async (userId, entryId) => {
+  try {
+    const base64 = await loadImageBase64(entryId);
+    if (!base64) return null;
+
+    const fileName = `${userId}/${entryId}.jpg`;
+    const { data, error } = await supabase.storage
+      .from("journal-images")
+      .upload(fileName, decode(base64), {
+        contentType: "image/jpeg",
+        upsert: true,
+      });
+
+    if (error) {
+      console.warn("Image upload failed:", error.message);
+      return null;
+    }
+
+    return fileName;
+  } catch (e) {
+    console.warn("Image upload exception:", e.message);
+    return null;
+  }
+};
+
+// Base64 to ArrayBuffer for upload
+function decode(base64) {
+  const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+  const bytes = [];
+  let buffer = 0;
+  let bits = 0;
+  for (let i = 0; i < base64.length; i++) {
+    const val = chars.indexOf(base64[i]);
+    if (val === -1) continue;
+    buffer = (buffer << 6) | val;
+    bits += 6;
+    if (bits >= 8) {
+      bits -= 8;
+      bytes.push((buffer >> bits) & 0xff);
+    }
+  }
+  return new Uint8Array(bytes);
+}
 
 // ── SYNC ENTRY TO CLOUD ──────────────────────────────────────────────────────
 export const syncEntryToCloud = async (entry, collections) => {
   try {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return;
+
+    // Upload image to storage
+    const imagePath = await uploadImage(user.id, entry.id);
 
     const r = entry.result || {};
 
@@ -23,7 +72,7 @@ export const syncEntryToCloud = async (entry, collections) => {
         location: entry.location || null,
         latitude: entry.latitude || null,
         longitude: entry.longitude || null,
-        image_path: entry.imageUri || null,
+        image_path: imagePath || entry.imageUri || null,
         saved_at: entry.savedAt || new Date().toISOString(),
       }, { onConflict: "id" });
 
@@ -34,14 +83,12 @@ export const syncEntryToCloud = async (entry, collections) => {
 
     // Sync collections for this entry
     if (collections && collections.length > 0) {
-      // Delete existing collection links for this entry
       await supabase
         .from("entry_collections")
         .delete()
         .eq("entry_id", entry.id)
         .eq("user_id", user.id);
 
-      // Insert new collection links
       const links = collections.map(name => ({
         entry_id: entry.id,
         user_id: user.id,
@@ -49,7 +96,6 @@ export const syncEntryToCloud = async (entry, collections) => {
       }));
       await supabase.from("entry_collections").insert(links);
 
-      // Ensure collection records exist
       for (const name of collections) {
         const icon = entry.result?.subjectCategory
           ? getIconForCategory(entry.result.subjectCategory)
@@ -64,10 +110,9 @@ export const syncEntryToCloud = async (entry, collections) => {
       }
     }
 
-    console.log("Cloud sync: entry saved", entry.id);
+    console.log("Cloud sync: entry saved", entry.id, imagePath ? "with image" : "no image");
   } catch (e) {
     console.warn("Cloud sync failed:", e.message);
-    // Fail silently — local save already succeeded
   }
 };
 
@@ -77,6 +122,10 @@ export const deleteEntryFromCloud = async (entryId) => {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return;
 
+    // Delete image from storage
+    const fileName = `${user.id}/${entryId}.jpg`;
+    await supabase.storage.from("journal-images").remove([fileName]);
+
     // Delete entry (cascades to entry_collections)
     await supabase
       .from("entries")
@@ -84,9 +133,7 @@ export const deleteEntryFromCloud = async (entryId) => {
       .eq("id", entryId)
       .eq("user_id", user.id);
 
-    // Clean up orphaned collections
     await cleanOrphanedCollections(user.id);
-
     console.log("Cloud sync: entry deleted", entryId);
   } catch (e) {
     console.warn("Cloud delete failed:", e.message);
@@ -99,14 +146,12 @@ export const updateEntryCollectionsCloud = async (entryId, newCollections) => {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return;
 
-    // Delete existing links
     await supabase
       .from("entry_collections")
       .delete()
       .eq("entry_id", entryId)
       .eq("user_id", user.id);
 
-    // Insert new links
     if (newCollections.length > 0) {
       const links = newCollections.map(name => ({
         entry_id: entryId,
@@ -115,7 +160,6 @@ export const updateEntryCollectionsCloud = async (entryId, newCollections) => {
       }));
       await supabase.from("entry_collections").insert(links);
 
-      // Ensure collection records exist
       for (const name of newCollections) {
         await supabase
           .from("collections")
@@ -140,14 +184,12 @@ export const deleteCollectionFromCloud = async (collectionName) => {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return;
 
-    // Remove collection links
     await supabase
       .from("entry_collections")
       .delete()
       .eq("collection_name", collectionName)
       .eq("user_id", user.id);
 
-    // Delete collection record
     await supabase
       .from("collections")
       .delete()
@@ -160,13 +202,12 @@ export const deleteCollectionFromCloud = async (collectionName) => {
   }
 };
 
-// ── PULL FROM CLOUD (on launch / manual refresh) ─────────────────────────────
+// ── PULL FROM CLOUD ──────────────────────────────────────────────────────────
 export const pullFromCloud = async () => {
   try {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return null;
 
-    // Fetch entries
     const { data: cloudEntries, error: entriesError } = await supabase
       .from("entries")
       .select("*")
@@ -178,7 +219,6 @@ export const pullFromCloud = async () => {
       return null;
     }
 
-    // Fetch entry-collection links
     const { data: cloudLinks, error: linksError } = await supabase
       .from("entry_collections")
       .select("entry_id, collection_name")
@@ -189,7 +229,6 @@ export const pullFromCloud = async () => {
       return null;
     }
 
-    // Fetch collections
     const { data: cloudCollections, error: collError } = await supabase
       .from("collections")
       .select("*")
@@ -201,30 +240,40 @@ export const pullFromCloud = async () => {
       return null;
     }
 
-    // Build a map of entry_id → collection names
     const collMap = {};
     for (const link of (cloudLinks || [])) {
       if (!collMap[link.entry_id]) collMap[link.entry_id] = [];
       collMap[link.entry_id].push(link.collection_name);
     }
 
-    // Convert cloud entries to local format
-    const entries = (cloudEntries || []).map(e => ({
-      id: e.id,
-      savedAt: e.saved_at,
-      imageUri: e.image_path,
-      location: e.location,
-      latitude: e.latitude,
-      longitude: e.longitude,
-      result: e.result_json || {
-        subject: e.subject,
-        tagline: e.tagline,
-        confidence: e.confidence,
-        confidenceNote: e.confidence_note,
-        subjectCategory: e.subject_category,
-      },
-      collections: collMap[e.id] || [],
-    }));
+    const entries = (cloudEntries || []).map(e => {
+      // Build image URL from Supabase Storage if available
+      let imageUri = e.image_path;
+      if (imageUri && !imageUri.startsWith("content://") && !imageUri.startsWith("file://")) {
+        const { data } = supabase.storage
+          .from("journal-images")
+          .getPublicUrl(imageUri);
+        imageUri = data?.publicUrl || e.image_path;
+      }
+
+      return {
+        id: e.id,
+        savedAt: e.saved_at,
+        imageUri,
+        cloudImagePath: e.image_path,
+        location: e.location,
+        latitude: e.latitude,
+        longitude: e.longitude,
+        result: e.result_json || {
+          subject: e.subject,
+          tagline: e.tagline,
+          confidence: e.confidence,
+          confidenceNote: e.confidence_note,
+          subjectCategory: e.subject_category,
+        },
+        collections: collMap[e.id] || [],
+      };
+    });
 
     const collections = (cloudCollections || []).map(c => ({
       name: c.name,
@@ -283,7 +332,6 @@ export const getScanCountFromCloud = async () => {
 
 const cleanOrphanedCollections = async (userId) => {
   try {
-    // Get all collection names that still have entries
     const { data: usedLinks } = await supabase
       .from("entry_collections")
       .select("collection_name")
@@ -291,13 +339,11 @@ const cleanOrphanedCollections = async (userId) => {
 
     const usedNames = new Set((usedLinks || []).map(l => l.collection_name));
 
-    // Get all collections
     const { data: allCollections } = await supabase
       .from("collections")
       .select("name")
       .eq("user_id", userId);
 
-    // Delete orphaned ones
     for (const c of (allCollections || [])) {
       if (!usedNames.has(c.name)) {
         await supabase
