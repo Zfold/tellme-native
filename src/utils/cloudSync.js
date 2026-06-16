@@ -1,5 +1,6 @@
 import { supabase } from "./supabase";
 import { loadImageBase64 } from "./storage";
+import { decode } from "base64-arraybuffer";
 
 // ── UPLOAD IMAGE TO SUPABASE STORAGE ─────────────────────────────────────────
 const uploadImage = async (userId, entryId) => {
@@ -27,24 +28,7 @@ const uploadImage = async (userId, entryId) => {
   }
 };
 
-// Base64 to ArrayBuffer for upload
-function decode(base64) {
-  const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-  const bytes = [];
-  let buffer = 0;
-  let bits = 0;
-  for (let i = 0; i < base64.length; i++) {
-    const val = chars.indexOf(base64[i]);
-    if (val === -1) continue;
-    buffer = (buffer << 6) | val;
-    bits += 6;
-    if (bits >= 8) {
-      bits -= 8;
-      bytes.push((buffer >> bits) & 0xff);
-    }
-  }
-  return new Uint8Array(bytes);
-}
+
 
 // ── SYNC ENTRY TO CLOUD ──────────────────────────────────────────────────────
 export const syncEntryToCloud = async (entry, collections) => {
