@@ -229,17 +229,12 @@ export const pullFromCloud = async () => {
 
     const entries = (cloudEntries || []).map(e => {
       let imageUri = e.image_path;
-      if (imageUri && !imageUri.startsWith("content://") && !imageUri.startsWith("file://")) {
-        const { data } = supabase.storage
-          .from("journal-images")
-          .getPublicUrl(imageUri);
-        imageUri = data?.publicUrl || e.image_path;
-      }
-
+      // Cloud image paths will be resolved to signed URLs on demand
+      // For now, keep the path — local imageUri will be preferred during merge
       return {
         id: e.id,
         savedAt: e.saved_at,
-        imageUri,
+        imageUri: imageUri,
         cloudImagePath: e.image_path,
         location: e.location,
         latitude: e.latitude,

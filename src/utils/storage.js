@@ -225,15 +225,24 @@ export const syncFromCloud = async () => {
     const localEntries = await loadEntries();
     const localCollections = await loadCollections();
 
-    // Build sets of local and cloud entry IDs
-    const localIds = new Set(localEntries.map(e => e.id));
+    // Build maps for merging
+    const localMap = new Map(localEntries.map(e => [e.id, e]));
     const cloudIds = new Set(cloudData.entries.map(e => e.id));
 
-    // Merge: cloud is source of truth, but keep local-only entries (unssynced)
-    const merged = [...cloudData.entries];
+    // Merge: keep local imageUri when available, use cloud for everything else
+    const merged = cloudData.entries.map(cloudEntry => {
+      const localEntry = localMap.get(cloudEntry.id);
+      if (localEntry && localEntry.imageUri &&
+          (localEntry.imageUri.startsWith("content://") || localEntry.imageUri.startsWith("file://"))) {
+        // Preserve local image URI — it works on this device
+        return { ...cloudEntry, imageUri: localEntry.imageUri };
+      }
+      return cloudEntry;
+    });
+
+    // Add local-only entries not yet in cloud
     for (const local of localEntries) {
       if (!cloudIds.has(local.id)) {
-        // Local entry not in cloud — sync it up
         merged.push(local);
         syncEntryToCloud(local, local.collections || []).catch(() => {});
       }
