@@ -3,17 +3,9 @@ import { loadImageBase64 } from "./storage";
 import { decode } from "base64-arraybuffer";
 
 // ── UPLOAD IMAGE TO SUPABASE STORAGE ─────────────────────────────────────────
-const uploadImage = async (userId, entryId) => {
+const uploadImage = async (userId, entryId, base64) => {
   try {
-    const base64 = await loadImageBase64(entryId);
-    if (!base64) {
-      const { Alert } = require("react-native");
-      Alert.alert("Upload Debug", "No base64 found for entry " + entryId);
-      return null;
-    }
-
-    const { Alert } = require("react-native");
-    Alert.alert("Upload Debug", "Base64 loaded, length: " + base64.length + ". Uploading...");
+    if (!base64) return null;
 
     const fileName = `${userId}/${entryId}.jpg`;
     const { data, error } = await supabase.storage
@@ -24,20 +16,16 @@ const uploadImage = async (userId, entryId) => {
       });
 
     if (error) {
-      Alert.alert("Upload Error", error.message);
+      console.warn("Image upload failed:", error.message);
       return null;
     }
 
-    Alert.alert("Upload Success", "Image uploaded: " + fileName);
     return fileName;
   } catch (e) {
-    const { Alert } = require("react-native");
-    Alert.alert("Upload Exception", e.message);
+    console.warn("Image upload exception:", e.message);
     return null;
   }
 };
-
-
 
 // ── SYNC ENTRY TO CLOUD ──────────────────────────────────────────────────────
 export const syncEntryToCloud = async (entry, collections) => {
@@ -45,8 +33,8 @@ export const syncEntryToCloud = async (entry, collections) => {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return;
 
-    // Upload image to storage
-    const imagePath = await uploadImage(user.id, entry.id);
+    // Upload image to storage — pass base64 directly from entry
+    const imagePath = await uploadImage(user.id, entry.id, entry.imageBase64);
 
     const r = entry.result || {};
 
@@ -240,7 +228,6 @@ export const pullFromCloud = async () => {
     }
 
     const entries = (cloudEntries || []).map(e => {
-      // Build image URL from Supabase Storage if available
       let imageUri = e.image_path;
       if (imageUri && !imageUri.startsWith("content://") && !imageUri.startsWith("file://")) {
         const { data } = supabase.storage
