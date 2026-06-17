@@ -3,9 +3,21 @@ import {
   getCurrentSeason,
   CATEGORY_ICONS,
 } from "../constants";
+import { supabase } from "./supabase";
 
 // ── RAILWAY BACKEND URL ───────────────────────────────────────────────────────
 const BACKEND_URL = "https://tellme-backend-production.up.railway.app";
+
+// ── AUTH TOKEN HELPER ─────────────────────────────────────────────────────────
+const getAuthHeaders = async () => {
+  try {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (session?.access_token) {
+      return { "Authorization": `Bearer ${session.access_token}` };
+    }
+  } catch {}
+  return {};
+};
 
 // ── IMAGE COMPRESSION ─────────────────────────────────────────────────────────
 export const compressImage = async (uri) => {
@@ -93,14 +105,24 @@ export const findNearbyLandmark = (coords) => {
 // ── GOOGLE VISION — via Railway backend ──────────────────────────────────────
 export const callGoogleVision = async (base64) => {
   try {
+    const auth = await getAuthHeaders();
     const res = await fetch(`${BACKEND_URL}/vision`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...auth },
       body: JSON.stringify({ base64, mime: "image/jpeg" }),
     });
-    if (!res.ok) return null;
+    if (!res.ok) {
+      const errData = await res.json().catch(() => ({}));
+      if (errData.code === "SCAN_LIMIT") {
+        throw new Error(errData.message || "Daily scan limit reached.");
+      }
+      return null;
+    }
     return await res.json();
   } catch (e) {
+    if (e.message.includes("scan limit") || e.message.includes("Upgrade")) {
+      throw e; // Re-throw scan limit errors so HomeScreen can show the alert
+    }
     console.warn("Vision API failed:", e.message);
     return null;
   }
@@ -286,9 +308,10 @@ export const triageImage = async (base64, mime, coords, exifPresent) => {
 
 // ── CALL CLAUDE — via Railway backend ─────────────────────────────────────────
 export const callClaude = async (messages, system, locationContext, visionContext) => {
+  const auth = await getAuthHeaders();
   const res = await fetch(`${BACKEND_URL}/analyze`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", ...auth },
     body: JSON.stringify({
       messages,
       system: system || undefined,
