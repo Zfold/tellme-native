@@ -2,6 +2,7 @@ import * as Print from "expo-print";
 import * as Sharing from "expo-sharing";
 import * as FileSystem from "expo-file-system/legacy";
 import { loadImageBase64 } from "./storage";
+import { supabase } from "./supabase";
 
 // ── MAIN EXPORT FUNCTION ──────────────────────────────────────────────────────
 export const exportCollectionPDF = async (collection, entries) => {
@@ -180,8 +181,35 @@ export const exportCollectionPDF = async (collection, entries) => {
     const entry = collEntries[i];
     const r = entry.result || {};
     const conf = r.confidence || 0;
-    // Load image from separate storage
-    const b64 = await loadImageBase64(entry.id);
+    // Load image from separate storage, fallback to Supabase
+    let b64 = await loadImageBase64(entry.id);
+
+    // Fallback: download from Supabase Storage if not available locally
+    if (!b64 && (entry.cloudImagePath || entry.id)) {
+      try {
+        // Try stored cloud path first, then construct one
+        let cloudPath = entry.cloudImagePath;
+        if (!cloudPath) {
+          const { data: { user } } = await supabase.auth.getUser();
+          if (user) cloudPath = `${user.id}/${entry.id}.jpg`;
+        }
+        if (cloudPath) {
+          const { data, error } = await supabase.storage
+            .from("journal-images")
+            .download(cloudPath);
+          if (!error && data) {
+            const reader = new FileReader();
+            b64 = await new Promise((resolve) => {
+              reader.onloadend = () => resolve(reader.result?.split(",")[1] || null);
+              reader.readAsDataURL(data);
+            });
+          }
+        }
+      } catch (e) {
+        console.warn("Cloud image download failed:", e.message);
+      }
+    }
+
     const imgSrc = b64 ? `data:image/jpeg;base64,${b64}` : null;
 
     const entryDate = new Date(entry.savedAt).toLocaleDateString("en-US", {
