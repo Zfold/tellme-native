@@ -53,7 +53,7 @@ export const syncEntryToCloud = async (entry, collections) => {
         location: entry.location || null,
         latitude: entry.latitude || null,
         longitude: entry.longitude || null,
-        image_path: imagePath || entry.imageUri || null,
+        image_path: imagePath || null,
         saved_at: entry.savedAt || new Date().toISOString(),
       }, { onConflict: "id" });
 
