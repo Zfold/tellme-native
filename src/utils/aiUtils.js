@@ -202,24 +202,33 @@ export const buildVisionContext = (visionResult) => {
 
   if (lines.length === 0) return null;
 
+  // Calculate top web entity score for confidence guidance
+  const topWebScore = webEntities.length > 0 ? Math.round(webEntities[0].score * 100) : 0;
+
   lines.push("\n── EVIDENCE SUMMARY AND CONFIDENCE CAP ──");
+  lines.push(`Top web entity score: ${topWebScore}%`);
+
   if (detectedText && bestGuesses.length > 0) {
     lines.push("EVIDENCE LEVEL: STRONG — text detected in image plus web reverse image match.");
-    lines.push("CONFIDENCE RANGE: 85-98% appropriate if text and web result agree.");
+    lines.push("CONFIDENCE RANGE: 85-95% appropriate only if text and web result agree.");
   } else if (detectedText) {
     lines.push("EVIDENCE LEVEL: GOOD — text detected in image but no web confirmation.");
-    lines.push("CONFIDENCE RANGE: 75-90% appropriate. Read the text carefully.");
-  } else if (bestGuesses.length > 0 || fullMatches.length > 0) {
-    lines.push("EVIDENCE LEVEL: GOOD — web reverse image match available.");
-    lines.push("CONFIDENCE RANGE: 75-92% appropriate. Do NOT let generic labels override the web result.");
-  } else if (webEntities.length > 0) {
-    lines.push("EVIDENCE LEVEL: MODERATE — named web entities but no exact match.");
-    lines.push("CONFIDENCE RANGE: 60-80% appropriate. Use web entities as primary signal.");
+    lines.push("CONFIDENCE RANGE: 75-88% appropriate. Read the text carefully.");
+  } else if (bestGuesses.length > 0 && (fullMatches.length > 0 || topWebScore > 70)) {
+    lines.push("EVIDENCE LEVEL: GOOD — web reverse image match with strong entity support.");
+    lines.push("CONFIDENCE RANGE: 75-88% appropriate. Do NOT let generic labels override the web result.");
+  } else if (bestGuesses.length > 0 || webEntities.length > 0) {
+    lines.push("EVIDENCE LEVEL: MODERATE — weak or partial web signal, no text confirmation.");
+    lines.push("CONFIDENCE RANGE: 55-72%. Do NOT name a specific cultivar, breed, product variant, or regional subtype unless visible features are highly distinctive.");
+    lines.push("For common grocery items and lookalikes, prefer a broad identification.");
+    lines.push("NEVER report above 72% for a specific variety/subtype when web/entity support is below 70% and there is no confirming text or exact image match.");
   } else {
     lines.push("EVIDENCE LEVEL: WEAK — no web matches, no text detected. Only visual labels available.");
     lines.push("CONFIDENCE CAP: Do NOT exceed 70%. Be explicit about uncertainty in confidenceNote.");
     lines.push("State clearly: 'Identification based on visual appearance only — no web confirmation available.'");
   }
+
+  lines.push("\nIMPORTANT: Google's bestGuessLabels are high-value clues, NOT automatic truth. They must be validated against visible features, exact matches, text, and web entity strength.");
 
   return lines.join("\n");
 };

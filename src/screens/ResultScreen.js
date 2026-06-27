@@ -247,6 +247,8 @@ export default function ResultScreen({ navigation, route }) {
         imageBase64: compressedBase64,
         result: activeResult,
         location,
+        latitude: locationData?.lat ?? null,
+        longitude: locationData?.lng ?? null,
         collections: selectedCollections,
       };
       const existing = await loadCollections();
@@ -279,7 +281,7 @@ export default function ResultScreen({ navigation, route }) {
             role: "user",
             content: [
               { type: "image", source: { type: "base64", media_type: imageMime, data: compressedBase64 } },
-              { type: "text", text: msg },
+              { type: "text", text: `Original result: ${activeResult.subject || "unknown"} (${activeResult.confidence ?? "unknown"}% confidence).\nOriginal confidence note: ${activeResult.confidenceNote || "none"}.\nIf the original result appears over-specific or wrong after re-checking the image, say so plainly and explain the uncertainty.\n\nUser question: ${msg}` },
             ],
           }],
         }),
