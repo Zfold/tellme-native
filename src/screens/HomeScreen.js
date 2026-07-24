@@ -7,6 +7,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import * as ImagePicker from "expo-image-picker";
 import * as Location from "expo-location";
 import { useFocusEffect } from "@react-navigation/native";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { COLORS, RADIUS, FREE_SCANS_PER_DAY } from "../constants";
 import {
   compressImage, extractGPSFromExif, reverseGeocode,
@@ -261,6 +262,14 @@ export default function HomeScreen({ navigation }) {
               <Text style={styles.primaryBtnIcon}>📷</Text>
               <Text style={styles.primaryBtnText}>Take Photo</Text>
             </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.multiViewBtn}
+              onPress={() => navigation.navigate("MultiView")}
+              activeOpacity={0.85}
+            >
+              <Text style={styles.multiViewBtnIcon}>📐</Text>
+              <Text style={styles.multiViewBtnText}>Multi-View (better accuracy)</Text>
+            </TouchableOpacity>
             <Text style={styles.hint}>
               Landmarks · Wildlife · Plants · Art · Food · Culture
             </Text>
@@ -301,6 +310,23 @@ export default function HomeScreen({ navigation }) {
               </TouchableOpacity>
             ))}
           </View>
+        )}
+
+        {/* Tutorial replay button */}
+        {!analyzing && (
+          <TouchableOpacity
+            style={styles.tutorialBtn}
+            onPress={async () => {
+              await AsyncStorage.removeItem("tellme_welcome_shown");
+              navigation.reset({ index: 0, routes: [{ name: "Home" }] });
+              // Force app to re-check welcome state
+              const { default: Updates } = await import("expo-updates").catch(() => ({}));
+              if (Updates?.reloadAsync) await Updates.reloadAsync();
+            }}
+            activeOpacity={0.7}
+          >
+            <Text style={styles.tutorialBtnText}>🎬 Watch Tutorial Again</Text>
+          </TouchableOpacity>
         )}
       </ScrollView>
     </SafeAreaView>
@@ -508,5 +534,36 @@ const styles = StyleSheet.create({
     fontSize: 10,
     fontFamily: "Courier New",
     flex: 1,
+  },
+  tutorialBtn: {
+    alignItems: "center",
+    paddingVertical: 14,
+    marginTop: 20,
+    borderTopWidth: 1,
+    borderTopColor: "rgba(255,255,255,0.06)",
+  },
+  tutorialBtnText: {
+    color: "rgba(255,255,255,0.25)",
+    fontSize: 12,
+    fontStyle: "italic",
+  },
+  multiViewBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    backgroundColor: COLORS.surface,
+    borderWidth: 1,
+    borderColor: COLORS.accentBorder,
+    borderRadius: RADIUS.lg,
+    paddingVertical: 14,
+  },
+  multiViewBtnIcon: {
+    fontSize: 16,
+  },
+  multiViewBtnText: {
+    color: COLORS.accent,
+    fontSize: 14,
+    fontWeight: "600",
   },
 });

@@ -369,6 +369,7 @@ export default function ResultScreen({ navigation, route }) {
                 {triageRoute === "landmark_confirmed" ? "📍 GPS LANDMARK CONFIRMED" :
                  triageRoute === "no_exif" ? "🔍 VISION ANALYSIS — NO LOCATION DATA" :
                  triageRoute === "vision_with_gps" ? "🔍 VISION ANALYSIS — WITH LOCATION" :
+                 triageRoute === "multiview" ? "📐 MULTI-VIEW ANALYSIS" :
                  "🔍 VISION ANALYSIS"}
               </Text>
             )}

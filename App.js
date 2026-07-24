@@ -7,12 +7,13 @@ import { COLORS } from "./src/constants";
 import { supabase } from "./src/utils/supabase";
 
 import AuthScreen       from "./src/screens/AuthScreen";
-import WelcomeScreen    from "./src/screens/WelcomeScreen";
+import OnboardingScreen from "./src/screens/OnboardingScreen";
 import HomeScreen       from "./src/screens/HomeScreen";
 import ResultScreen     from "./src/screens/ResultScreen";
 import JournalScreen    from "./src/screens/JournalScreen";
 import CollectionScreen from "./src/screens/CollectionScreen";
 import EntryScreen      from "./src/screens/EntryScreen";
+import MultiViewScreen  from "./src/screens/MultiViewScreen";
 
 const Stack = createNativeStackNavigator();
 const WELCOME_KEY = "tellme_welcome_shown";
@@ -24,18 +25,38 @@ export default function App() {
 
   // Listen for auth state changes
   useEffect(() => {
-    // Get initial session
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setSession(session);
-      setAuthLoading(false);
-    });
+    // Get initial session — wrapped in try/catch to prevent blank screen
+    supabase.auth.getSession()
+      .then(({ data: { session } }) => {
+        setSession(session);
+        setAuthLoading(false);
+      })
+      .catch((e) => {
+        console.warn("Auth session load failed:", e.message);
+        // Clear corrupted auth data and show sign-in screen
+        AsyncStorage.multiRemove([
+          "supabase.auth.token",
+          "supabase-auth-token",
+        ]).catch(() => {});
+        setSession(null);
+        setAuthLoading(false);
+      });
 
     // Listen for changes (sign in, sign out, token refresh)
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      setSession(session);
-    });
+    let subscription;
+    try {
+      const { data } = supabase.auth.onAuthStateChange((_event, session) => {
+        setSession(session);
+      });
+      subscription = data.subscription;
+    } catch (e) {
+      console.warn("Auth listener failed:", e.message);
+      setAuthLoading(false);
+    }
 
-    return () => subscription.unsubscribe();
+    return () => {
+      if (subscription) subscription.unsubscribe();
+    };
   }, []);
 
   // Check welcome screen status after auth
@@ -71,7 +92,7 @@ export default function App() {
     return (
       <>
         <StatusBar style="light" backgroundColor={COLORS.bg} />
-        <WelcomeScreen onComplete={handleWelcomeComplete} />
+        <OnboardingScreen onComplete={handleWelcomeComplete} />
       </>
     );
   }
@@ -92,6 +113,7 @@ export default function App() {
         <Stack.Screen name="Journal"    component={JournalScreen} />
         <Stack.Screen name="Collection" component={CollectionScreen} />
         <Stack.Screen name="Entry"      component={EntryScreen} />
+        <Stack.Screen name="MultiView"  component={MultiViewScreen} />
       </Stack.Navigator>
     </NavigationContainer>
   );
