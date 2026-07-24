@@ -318,10 +318,11 @@ export default function HomeScreen({ navigation }) {
             style={styles.tutorialBtn}
             onPress={async () => {
               await AsyncStorage.removeItem("tellme_welcome_shown");
-              navigation.reset({ index: 0, routes: [{ name: "Home" }] });
-              // Force app to re-check welcome state
-              const { default: Updates } = await import("expo-updates").catch(() => ({}));
-              if (Updates?.reloadAsync) await Updates.reloadAsync();
+              Alert.alert(
+                "Tutorial Reset",
+                "Close and reopen the app to watch the tutorial again.",
+                [{ text: "OK" }]
+              );
             }}
             activeOpacity={0.7}
           >
