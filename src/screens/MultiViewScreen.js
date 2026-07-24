@@ -149,16 +149,36 @@ export default function MultiViewScreen({ navigation }) {
         }
       }
 
-      // Run Vision on the primary (first) image
-      setStatusText("Analyzing with Google Vision...");
-      const primaryImage = images.find(Boolean);
-      const visionResult = await callGoogleVision(primaryImage.base64);
-      const visionContext = visionResult ? buildVisionContext(visionResult) : null;
+      // Run Vision on ALL images and combine best results
+      setStatusText("Analyzing all views with Google Vision...");
+      const filledImages = images.filter(Boolean);
+      let bestVisionResult = null;
+      let bestWebScore = 0;
+      const allVisionContexts = [];
+
+      for (const img of filledImages) {
+        const vResult = await callGoogleVision(img.base64);
+        if (vResult) {
+          // Track which image gave the strongest web detection
+          const webEntities = vResult.webDetection?.webEntities || [];
+          const topScore = webEntities.length > 0 ? webEntities[0].score : 0;
+          if (topScore > bestWebScore) {
+            bestWebScore = topScore;
+            bestVisionResult = vResult;
+          }
+          const ctx = buildVisionContext(vResult);
+          if (ctx) allVisionContexts.push(ctx);
+        }
+      }
+
+      // Use the best Vision result, but include unique findings from all
+      const visionContext = allVisionContexts.length > 0
+        ? allVisionContexts.join("\n\n--- Additional view Vision data ---\n")
+        : null;
 
       // Build multi-image message for Claude
       setStatusText("Your guide is researching all views...");
-      const imageContents = images
-        .filter(Boolean)
+      const imageContents = filledImages
         .map((img, i) => ({
           type: "image",
           source: { type: "base64", media_type: img.mime, data: img.base64 },
@@ -175,7 +195,28 @@ export default function MultiViewScreen({ navigation }) {
           ...imageContents,
           {
             type: "text",
-            text: `MULTI-VIEW IDENTIFICATION: ${filledCount} different views of the SAME subject have been provided (${viewLabels}). Analyze ALL views together for the most accurate identification. Details visible in one view may confirm or clarify what's seen in others. Respond with the JSON.`,
+            text: `MULTI-VIEW IDENTIFICATION: ${filledCount} different views of the SAME subject have been provided (${viewLabels}).
+
+IMPORTANT RULES FOR MULTI-VIEW:
+- Google Vision data has been run on ALL views. Use it as your PRIMARY identification signal, just like single-view scans.
+- The multiple views are SUPPLEMENTARY EVIDENCE to confirm or refine the Vision identification — not to override it.
+- If Vision identifies the subject clearly from any view, trust that identification.
+- Use additional views to confirm details (species, variety, condition) — not to second-guess the primary ID.
+- All views show the SAME subject from different angles. Do not identify each view as a different subject.
+
+CONFLICT RESOLUTION — when different views suggest different identifications:
+- CLOSE-UP and DETAIL views carry MORE weight than wide/overview shots for species-level identification. A close-up showing distinctive leaf shape, gill pattern, or bark texture is more diagnostic than a silhouette.
+- WIDE and CONTEXT views carry MORE weight for habitat, scale, and environment context.
+- If Vision returns different results for different views, prioritize the result with the HIGHEST web entity score and most specific match.
+- If a detail view reveals a distinctive feature (cupped leaves, spore pattern, unique markings) that narrows the identification to a specific species, that feature OVERRIDES a generic wider identification.
+- When views genuinely conflict and cannot be reconciled:
+  1. Present the MOST LIKELY identification based on the strongest combined evidence.
+  2. Mention the alternative possibility in the confidenceNote.
+  3. Lower confidence to reflect the ambiguity (never above 75% when views conflict).
+  4. In the "Did You Know" or a section, explain what distinguishing feature would resolve the ambiguity.
+- Example: If View 1 suggests "Jade Plant" and View 2's leaf cupping suggests "Crassula ovata 'Gollum'", identify as the MORE SPECIFIC option since the detail view revealed a distinguishing feature.
+
+Respond with the JSON.`,
           },
         ],
       }];
