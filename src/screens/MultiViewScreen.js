@@ -27,7 +27,7 @@ const VIEW_GUIDES = {
   ],
   Mushroom: [
     { label: "1", title: "Cap (Top)", hint: "Looking down at the cap" },
-    { label: "2", title: "Gills / Stem", hint: "Underneath — gills, pores, or teeth" },
+    { label: "2", title: "Gills / Stem", hint: "Underneath ΓÇö gills, pores, or teeth" },
     { label: "3", title: "Habitat", hint: "Base, soil, what it's growing on" },
   ],
   Plant: [
@@ -199,12 +199,12 @@ export default function MultiViewScreen({ navigation }) {
 
 IMPORTANT RULES FOR MULTI-VIEW:
 - Google Vision data has been run on ALL views. Use it as your PRIMARY identification signal, just like single-view scans.
-- The multiple views are SUPPLEMENTARY EVIDENCE to confirm or refine the Vision identification — not to override it.
+- The multiple views are SUPPLEMENTARY EVIDENCE to confirm or refine the Vision identification ΓÇö not to override it.
 - If Vision identifies the subject clearly from any view, trust that identification.
-- Use additional views to confirm details (species, variety, condition) — not to second-guess the primary ID.
+- Use additional views to confirm details (species, variety, condition) ΓÇö not to second-guess the primary ID.
 - All views show the SAME subject from different angles. Do not identify each view as a different subject.
 
-CONFLICT RESOLUTION — when different views suggest different identifications:
+CONFLICT RESOLUTION ΓÇö when different views suggest different identifications:
 - CLOSE-UP and DETAIL views carry MORE weight than wide/overview shots for species-level identification. A close-up showing distinctive leaf shape, gill pattern, or bark texture is more diagnostic than a silhouette.
 - WIDE and CONTEXT views carry MORE weight for habitat, scale, and environment context.
 - If Vision returns different results for different views, prioritize the result with the HIGHEST web entity score and most specific match.
@@ -231,6 +231,9 @@ Respond with the JSON.`,
       await incrementScanCount();
 
       // Navigate to result screen with primary image
+      // Use the first filled image as the display/save image on the Result screen.
+      // filledImages was built earlier from images.filter(Boolean).
+      const primaryImage = filledImages[0];
       const location = locData?.full || null;
       navigation.replace("Result", {
         result,
@@ -255,7 +258,7 @@ Respond with the JSON.`,
         {/* Header */}
         <View style={styles.header}>
           <TouchableOpacity onPress={() => navigation.goBack()}>
-            <Text style={styles.backText}>← BACK</Text>
+            <Text style={styles.backText}>ΓåÉ BACK</Text>
           </TouchableOpacity>
           <Text style={styles.title}>Multi-View Capture</Text>
           <Text style={styles.subtitle}>
@@ -272,7 +275,7 @@ Respond with the JSON.`,
               onPress={() => setSubjectHint(subjectHint === key ? "default" : key)}
             >
               <Text style={[styles.hintChipText, subjectHint === key && styles.hintChipTextActive]}>
-                {key === "Mushroom" ? "🍄" : key === "Plant" ? "🌿" : key === "Insect" ? "🦋" : "🐦"} {key}
+                {key === "Mushroom" ? "≡ƒìä" : key === "Plant" ? "≡ƒî┐" : key === "Insect" ? "≡ƒªï" : "≡ƒÉª"} {key}
               </Text>
             </TouchableOpacity>
           ))}
@@ -297,7 +300,7 @@ Respond with the JSON.`,
                 ) : (
                   <View style={styles.panelEmpty}>
                     <Text style={styles.panelNumber}>{slot + 1}</Text>
-                    <Text style={styles.panelIcon}>📷</Text>
+                    <Text style={styles.panelIcon}>≡ƒô╖</Text>
                   </View>
                 )}
               </TouchableOpacity>
@@ -323,7 +326,7 @@ Respond with the JSON.`,
             onPress={() => captureImage(activeSlot)}
             activeOpacity={0.85}
           >
-            <Text style={styles.captureBtnIcon}>📷</Text>
+            <Text style={styles.captureBtnIcon}>≡ƒô╖</Text>
             <Text style={styles.captureBtnText}>
               Capture {guides[activeSlot].title}
             </Text>
@@ -357,13 +360,13 @@ Respond with the JSON.`,
         {/* Tips */}
         {!analyzing && filledCount === 0 && (
           <View style={styles.tipsBox}>
-            <Text style={styles.tipsTitle}>📐 Tips for better identification</Text>
+            <Text style={styles.tipsTitle}>≡ƒôÉ Tips for better identification</Text>
             <Text style={styles.tipsText}>
-              • Each view should show a DIFFERENT angle or detail{"\n"}
-              • Get close for texture, patterns, and markings{"\n"}
-              • Include scale reference (hand, coin) when possible{"\n"}
-              • Capture the environment the subject is in{"\n"}
-              • Good lighting makes a big difference
+              ΓÇó Each view should show a DIFFERENT angle or detail{"\n"}
+              ΓÇó Get close for texture, patterns, and markings{"\n"}
+              ΓÇó Include scale reference (hand, coin) when possible{"\n"}
+              ΓÇó Capture the environment the subject is in{"\n"}
+              ΓÇó Good lighting makes a big difference
             </Text>
           </View>
         )}
