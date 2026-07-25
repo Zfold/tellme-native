@@ -1,570 +1,387 @@
-import { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback } from 'react';
 import {
-  View, Text, StyleSheet, TouchableOpacity,
-  ScrollView, Alert, ActivityIndicator, Switch,
-} from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
-import * as ImagePicker from "expo-image-picker";
-import * as Location from "expo-location";
-import { useFocusEffect } from "@react-navigation/native";
-import AsyncStorage from "@react-native-async-storage/async-storage";
-import { COLORS, RADIUS, FREE_SCANS_PER_DAY } from "../constants";
-import {
-  compressImage, extractGPSFromExif, reverseGeocode,
-  buildLocationContext, triageImage, callGoogleVision,
-  buildVisionContext, buildPrompt, callClaude, extractAndRepairJSON,
-} from "../utils/aiUtils";
-import {
-  loadSettings, saveSettings, loadEntries,
-  loadCollections, checkScanLimit, incrementScanCount,
-  syncFromCloud,
-} from "../utils/storage";
+  View,
+  Text,
+  StyleSheet,
+  TouchableOpacity,
+  ScrollView,
+  Switch,
+  Image,
+  SafeAreaView,
+  StatusBar,
+} from 'react-native';
+import { useFocusEffect } from '@react-navigation/native';
+import * as Location from 'expo-location';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+
+import { COLORS, RADIUS, FREE_SCANS_PER_DAY } from '../constants';
+import { checkScanLimit, loadEntries } from '../utils/storage';
 
 export default function HomeScreen({ navigation }) {
-  const [settings, setSettings]           = useState({ useLocation: true, isPremium: false });
-  const [analyzing, setAnalyzing]         = useState(false);
-  const [statusText, setStatusText]       = useState("");
+  const [scansRemaining, setScansRemaining] = useState(FREE_SCANS_PER_DAY);
+  const [useLocation, setUseLocation] = useState(true);
   const [recentEntries, setRecentEntries] = useState([]);
-  const [scanInfo, setScanInfo]           = useState({ remaining: FREE_SCANS_PER_DAY });
 
-  // Load settings and recent entries whenever screen is focused
+  const refreshState = useCallback(async () => {
+    try {
+      const savedPref = await AsyncStorage.getItem('tellme_use_location');
+      if (savedPref !== null) setUseLocation(savedPref === 'true');
+
+      const scanInfo = await checkScanLimit(false, FREE_SCANS_PER_DAY);
+      setScansRemaining(Math.max(0, FREE_SCANS_PER_DAY - (scanInfo?.count ?? 0)));
+
+      const entries = await loadEntries();
+      setRecentEntries((entries || []).slice(0, 3));
+    } catch (err) {
+      console.log('HomeScreen refresh error:', err);
+    }
+  }, []);
+
+  useEffect(() => {
+    refreshState();
+  }, [refreshState]);
+
   useFocusEffect(
     useCallback(() => {
-      (async () => {
-        const s = await loadSettings();
-        setSettings(s);
-        const entries = await loadEntries();
-        setRecentEntries(entries.slice(0, 3));
-        const limit = await checkScanLimit(s.isPremium, FREE_SCANS_PER_DAY);
-        setScanInfo(limit);
-        // Cloud sync in background (non-blocking)
-        syncFromCloud().catch(() => {});
-      })();
-    }, [])
+      refreshState();
+    }, [refreshState])
   );
 
-  const toggleLocation = async (val) => {
-    const updated = { ...settings, useLocation: val };
-    setSettings(updated);
-    await saveSettings(updated);
-  };
-
-  const pickImage = async (useCamera) => {
-    try {
-      // Check scan limit
-      const limit = await checkScanLimit(settings.isPremium, FREE_SCANS_PER_DAY);
-      if (!limit.allowed) {
-        Alert.alert(
-          "Daily Limit Reached",
-          `You have used all ${FREE_SCANS_PER_DAY} free scans for today. Upgrade to premium for unlimited scans.`,
-          [{ text: "OK" }]
-        );
-        return;
-      }
-
-      // Request permissions
-      if (useCamera) {
-        const { status } = await ImagePicker.requestCameraPermissionsAsync();
-        if (status !== "granted") {
-          Alert.alert("Permission needed", "Camera access is required to take photos.");
-          return;
-        }
-      } else {
-        const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-        if (status !== "granted") {
-          Alert.alert("Permission needed", "Photo library access is required.");
-          return;
-        }
-      }
-
-      // Launch camera or picker
-      const pickerResult = useCamera
-        ? await ImagePicker.launchCameraAsync({
-            mediaTypes: ["images"],
-            quality: 1,
-            exif: true,
-          })
-        : await ImagePicker.launchImageLibraryAsync({
-            mediaTypes: ["images"],
-            quality: 1,
-            exif: true,
-          });
-
-      if (pickerResult.canceled) return;
-
-      const asset = pickerResult.assets[0];
-      await analyzeImage(asset);
-    } catch (e) {
-      Alert.alert("Error", e.message);
+  const toggleLocation = async (value) => {
+    setUseLocation(value);
+    await AsyncStorage.setItem('tellme_use_location', value ? 'true' : 'false');
+    if (value) {
+      await Location.requestForegroundPermissionsAsync();
     }
   };
 
-  const analyzeImage = async (asset) => {
-    setAnalyzing(true);
-    try {
-      // Step 1 — Compress image
-      setStatusText("Preparing image...");
-      const compressed = await compressImage(asset.uri);
+  const goCamera = () => navigation.navigate('Camera', { useLocation });
+  const goMultiView = () => navigation.navigate('MultiView', { useLocation });
+  const goJournal = () => navigation.navigate('Journal');
+  const goEntry = (entry) => navigation.navigate('Entry', { entryId: entry.id });
+  const replayTutorial = () => navigation.navigate('Onboarding', { fromHome: true });
 
-      // Step 2 — Extract location (EXIF first, device GPS fallback)
-      let coords = null;
-      let locData = null;
-      let locationContext = null;
-      let exifPresent = false;
-
-      if (settings.useLocation) {
-        // Try EXIF GPS first
-        if (asset.exif) {
-          setStatusText("Reading photo location...");
-          coords = extractGPSFromExif(asset.exif);
-          exifPresent = !!coords;
-        }
-
-        // Fallback to device GPS if EXIF has no coordinates
-        if (!coords) {
-          setStatusText("Getting device location...");
-          try {
-            const { status } = await Location.requestForegroundPermissionsAsync();
-            if (status === "granted") {
-              const position = await Location.getCurrentPositionAsync({
-                accuracy: Location.Accuracy.Balanced,
-                timeout: 5000,
-              });
-              coords = { lat: position.coords.latitude, lng: position.coords.longitude };
-              exifPresent = true; // treat device GPS same as EXIF for triage purposes
-            }
-          } catch (e) {
-            console.warn("Device GPS fallback failed:", e.message);
-          }
-        }
-
-        // Reverse geocode whatever coordinates we have
-        if (coords) {
-          setStatusText("Resolving location...");
-          locData = await reverseGeocode(coords.lat, coords.lng);
-          if (locData) locationContext = buildLocationContext(locData);
-        }
-      }
-
-      // Step 3 — Triage
-      setStatusText("Evaluating image...");
-      const triage = await triageImage(compressed.base64, compressed.mime, coords, exifPresent);
-
-      // Step 4 — Google Vision (if needed)
-      let visionContext = null;
-      if (triage.useVision) {
-        setStatusText("Running visual identification...");
-        const visionResult = await callGoogleVision(compressed.base64);
-        visionContext = buildVisionContext(visionResult);
-      } else if (triage.nearbyLandmark) {
-        visionContext = `LANDMARK CONFIRMED BY GPS: ${triage.nearbyLandmark.name}\nDistance: ${triage.nearbyLandmark.distKm.toFixed(2)}km\nWrite rich landmark tour guide content.\nCONFIDENCE: VERY HIGH`;
-      }
-
-      // Step 5 — Claude analysis
-      setStatusText("Your guide is researching...");
-      const messages = [{
-        role: "user",
-        content: [
-          { type: "image", source: { type: "base64", media_type: compressed.mime, data: compressed.base64 } },
-          { type: "text", text: "Analyze this image and respond with the JSON." },
-        ],
-      }];
-      const raw = await callClaude(messages, null, locationContext, visionContext);
-      const parsed = JSON.parse(extractAndRepairJSON(raw));
-
-      // Step 6 — Increment scan count
-      await incrementScanCount();
-
-      // Step 7 — Navigate to results
-      navigation.navigate("Result", {
-        result: parsed,
-        imageUri: asset.uri,
-        compressedBase64: compressed.base64,
-        imageMime: compressed.mime,
-        location: locData?.full || null,
-        locationData: locData,
-        triageRoute: triage.route,
-      });
-    } catch (e) {
-      console.error("Analysis error:", e);
-      Alert.alert("Could not analyze image", e.message || "Please try again.");
-    } finally {
-      setAnalyzing(false);
-      setStatusText("");
-    }
+  const formatDate = (iso) => {
+    if (!iso) return '';
+    const d = new Date(iso);
+    return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
   };
 
   return (
-    <SafeAreaView style={styles.container} edges={["top"]}>
+    <SafeAreaView style={styles.safe}>
+      <StatusBar barStyle="light-content" backgroundColor={COLORS.bg} />
       <ScrollView
         contentContainerStyle={styles.scroll}
         showsVerticalScrollIndicator={false}
       >
-        {/* Header */}
-        <View style={styles.header}>
+        {/* Header row: wordmark + Journal card */}
+        <View style={styles.headerRow}>
           <View>
-            <Text style={styles.logo}>
-              <Text style={styles.logoWhite}>Tell</Text>
-              <Text style={styles.logoAccent}>ME</Text>
+            <Text style={styles.wordmark}>
+              Tell<Text style={styles.wordmarkAccent}>ME</Text>
             </Text>
             <Text style={styles.tagline}>Your world, explained.</Text>
           </View>
+
           <TouchableOpacity
-            style={styles.journalBtn}
-            onPress={() => navigation.navigate("Journal")}
+            style={styles.journalCard}
+            onPress={goJournal}
+            activeOpacity={0.7}
           >
-            <Text style={styles.journalBtnIcon}>📓</Text>
-            <Text style={styles.journalBtnLabel}>JOURNAL</Text>
+            <Text style={styles.journalIcon}>📓</Text>
+            <Text style={styles.journalLabel}>JOURNAL</Text>
           </TouchableOpacity>
         </View>
 
-        {/* Location toggle */}
-        <View style={styles.toggleRow}>
-          <View style={styles.toggleLeft}>
-            <Text style={styles.toggleIcon}>📍</Text>
-            <View>
-              <Text style={[styles.toggleTitle, { color: settings.useLocation ? COLORS.accent : COLORS.textMuted }]}>
-                USE PHOTO LOCATION
+        {/* Location toggle card */}
+        <View style={styles.locationCard}>
+          <View style={styles.locationLeft}>
+            <Text style={styles.locationPin}>📍</Text>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.locationLabel}>USE PHOTO LOCATION</Text>
+              <Text style={styles.locationSub}>
+                Improves species and landmark accuracy
               </Text>
-              <Text style={styles.toggleSub}>Improves species and landmark accuracy</Text>
             </View>
           </View>
           <Switch
-            value={settings.useLocation}
+            value={useLocation}
             onValueChange={toggleLocation}
-            trackColor={{ false: COLORS.border, true: COLORS.accent }}
-            thumbColor={settings.useLocation ? COLORS.bg : COLORS.textMuted}
+            trackColor={{ false: '#3A342A', true: COLORS.gold }}
+            thumbColor={useLocation ? '#0F0D0B' : '#8A8578'}
+            ios_backgroundColor="#3A342A"
           />
         </View>
 
-        {/* Scan count */}
-        {!settings.isPremium && (
-          <View style={styles.scanCount}>
-            <Text style={styles.scanCountText}>
-              {scanInfo.remaining ?? FREE_SCANS_PER_DAY} free scans remaining today
-            </Text>
-          </View>
-        )}
+        {/* Scans remaining */}
+        <Text style={styles.scansText}>
+          {scansRemaining} free scans remaining today
+        </Text>
 
-        {/* Camera buttons */}
-        {analyzing ? (
-          <View style={styles.analyzingBox}>
-            <ActivityIndicator size="large" color={COLORS.accent} />
-            <Text style={styles.analyzingText}>{statusText}</Text>
-          </View>
-        ) : (
-          <View style={styles.captureArea}>
-            <TouchableOpacity
-              style={styles.primaryBtn}
-              onPress={() => pickImage(true)}
-              activeOpacity={0.85}
-            >
-              <Text style={styles.primaryBtnIcon}>📷</Text>
-              <Text style={styles.primaryBtnText}>Take Photo</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={styles.multiViewBtn}
-              onPress={() => navigation.navigate("MultiView")}
-              activeOpacity={0.85}
-            >
-              <Text style={styles.multiViewBtnIcon}>📐</Text>
-              <Text style={styles.multiViewBtnText}>Multi-View (better accuracy)</Text>
-            </TouchableOpacity>
-            <Text style={styles.hint}>
-              Landmarks · Wildlife · Plants · Art · Food · Culture
-            </Text>
-          </View>
-        )}
+        {/* PRIMARY: Take Photo */}
+        <TouchableOpacity
+          style={styles.primaryBtn}
+          onPress={goCamera}
+          activeOpacity={0.85}
+        >
+          <Text style={styles.primaryIcon}>📷</Text>
+          <Text style={styles.primaryLabel}>Take Photo</Text>
+        </TouchableOpacity>
 
-        {/* Recent entries */}
-        {recentEntries.length > 0 && !analyzing && (
-          <View style={styles.recentSection}>
-            <View style={styles.recentHeader}>
-              <Text style={styles.recentLabel}>RECENT SAVES</Text>
-              <TouchableOpacity onPress={() => navigation.navigate("Journal")}>
-                <Text style={styles.seeAll}>SEE ALL →</Text>
-              </TouchableOpacity>
-            </View>
-            {recentEntries.map(entry => (
-              <TouchableOpacity
-                key={entry.id}
-                style={styles.recentCard}
-                onPress={() => navigation.navigate("Entry", { entry })}
-                activeOpacity={0.8}
-              >
-                <Text style={styles.recentSubject} numberOfLines={1}>
-                  {entry.result?.subject}
-                </Text>
-                <View style={styles.recentMeta}>
-                  <Text style={styles.recentDate}>
-                    {new Date(entry.savedAt).toLocaleDateString("en-US", {
-                      month: "short", day: "numeric",
-                    })}
-                  </Text>
-                  {entry.location && (
-                    <Text style={styles.recentLocation} numberOfLines={1}>
-                      📍 {entry.location}
-                    </Text>
-                  )}
-                </View>
-              </TouchableOpacity>
-            ))}
+        {/* SECONDARY: Take Multi-View Images */}
+        <TouchableOpacity
+          style={styles.secondaryBtn}
+          onPress={goMultiView}
+          activeOpacity={0.85}
+        >
+          <Text style={styles.secondaryIcon}>🖼️</Text>
+          <View style={styles.secondaryTextWrap}>
+            <Text style={styles.secondaryLabel}>Take Multi-View Images</Text>
+            <Text style={styles.secondarySub}>3 angles · better accuracy</Text>
           </View>
-        )}
+        </TouchableOpacity>
 
-        {/* Tutorial replay button */}
-        {!analyzing && (
-          <TouchableOpacity
-            style={styles.tutorialBtn}
-            onPress={async () => {
-              await AsyncStorage.removeItem("tellme_welcome_shown");
-              Alert.alert(
-                "Tutorial Reset",
-                "Close and reopen the app to watch the tutorial again.",
-                [{ text: "OK" }]
-              );
-            }}
-            activeOpacity={0.7}
-          >
-            <Text style={styles.tutorialBtnText}>🎬 Watch Tutorial Again</Text>
+        {/* Category chips */}
+        <Text style={styles.categoryLine}>
+          Landmarks · Wildlife · Plants · Art · Food · Culture
+        </Text>
+
+        {/* Recent Saves */}
+        <View style={styles.recentHeader}>
+          <Text style={styles.recentTitle}>RECENT SAVES</Text>
+          <TouchableOpacity onPress={goJournal}>
+            <Text style={styles.seeAll}>SEE ALL →</Text>
           </TouchableOpacity>
+        </View>
+
+        {recentEntries.length === 0 ? (
+          <Text style={styles.emptyHint}>Your saves will appear here.</Text>
+        ) : (
+          recentEntries.map((entry) => (
+            <TouchableOpacity
+              key={entry.id}
+              style={styles.recentCard}
+              onPress={() => goEntry(entry)}
+              activeOpacity={0.7}
+            >
+              <Text style={styles.recentSubject} numberOfLines={1}>
+                {entry.subject || 'Untitled'}
+              </Text>
+              <Text style={styles.recentDate}>{formatDate(entry.saved_at)}</Text>
+            </TouchableOpacity>
+          ))
         )}
+
+        {/* Tutorial replay chip */}
+        <TouchableOpacity
+          style={styles.tutorialChip}
+          onPress={replayTutorial}
+          activeOpacity={0.7}
+        >
+          <Text style={styles.tutorialIcon}>▶</Text>
+          <Text style={styles.tutorialLabel}>Watch Tutorial Again</Text>
+        </TouchableOpacity>
       </ScrollView>
     </SafeAreaView>
   );
 }
 
+const CARD_INSET = 20;
+
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: COLORS.bg,
+  safe: { flex: 1, backgroundColor: COLORS.bg },
+  scroll: { paddingHorizontal: CARD_INSET, paddingTop: 8, paddingBottom: 32 },
+
+  // Header
+  headerRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    marginBottom: 20,
   },
-  scroll: {
-    padding: 20,
-    paddingBottom: 40,
+  wordmark: {
+    fontSize: 44,
+    fontWeight: '800',
+    color: '#FFFFFF',
+    letterSpacing: -0.5,
   },
-  header: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "flex-end",
-    marginBottom: 24,
-    marginTop: 8,
-  },
-  logo: {
-    fontSize: 42,
-    lineHeight: 46,
-    fontWeight: "700",
-  },
-  logoWhite: {
-    color: COLORS.white,
-  },
-  logoAccent: {
-    color: COLORS.accent,
-  },
+  wordmarkAccent: { color: COLORS.gold },
   tagline: {
-    color: COLORS.textMuted,
-    fontSize: 13,
-    fontStyle: "italic",
+    fontSize: 14,
+    color: 'rgba(255,255,255,0.55)',
+    fontStyle: 'italic',
     marginTop: 2,
   },
-  journalBtn: {
-    backgroundColor: COLORS.surface,
+  journalCard: {
+    width: 78,
+    height: 78,
+    borderRadius: 14,
     borderWidth: 1,
-    borderColor: COLORS.border,
-    borderRadius: RADIUS.md,
-    paddingVertical: 8,
-    paddingHorizontal: 14,
-    alignItems: "center",
+    borderColor: 'rgba(255,255,255,0.12)',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  journalBtnIcon: {
-    fontSize: 18,
-  },
-  journalBtnLabel: {
-    color: COLORS.textMuted,
-    fontSize: 8,
-    letterSpacing: 1,
-    marginTop: 2,
-    fontFamily: "Courier New",
-  },
-  toggleRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    backgroundColor: COLORS.surface,
-    borderWidth: 1,
-    borderColor: COLORS.accentBorder,
-    borderRadius: RADIUS.md,
-    padding: 14,
-    marginBottom: 12,
-  },
-  toggleLeft: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 10,
-    flex: 1,
-  },
-  toggleIcon: {
-    fontSize: 18,
-  },
-  toggleTitle: {
-    fontSize: 10,
-    fontFamily: "Courier New",
-    letterSpacing: 1,
-    fontWeight: "700",
-  },
-  toggleSub: {
-    color: COLORS.textMuted,
+  journalIcon: { fontSize: 26, marginBottom: 4 },
+  journalLabel: {
     fontSize: 11,
-    fontStyle: "italic",
-    marginTop: 2,
+    fontWeight: '600',
+    color: 'rgba(255,255,255,0.75)',
+    letterSpacing: 0.8,
   },
-  scanCount: {
-    alignItems: "center",
+
+  // Location card
+  locationCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    borderRadius: RADIUS,
+    borderWidth: 1,
+    borderColor: 'rgba(245, 200, 66, 0.35)',
+    paddingVertical: 14,
+    paddingHorizontal: 16,
     marginBottom: 16,
   },
-  scanCountText: {
-    color: COLORS.textMuted,
-    fontSize: 11,
-    fontFamily: "Courier New",
-    letterSpacing: 0.5,
-  },
-  captureArea: {
-    alignItems: "center",
+  locationLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
     gap: 12,
-    marginBottom: 32,
   },
-  primaryBtn: {
-    backgroundColor: COLORS.accent,
-    borderRadius: RADIUS.lg,
-    paddingVertical: 16,
-    paddingHorizontal: 40,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 10,
-    width: "100%",
-    justifyContent: "center",
-  },
-  primaryBtnIcon: {
-    fontSize: 22,
-  },
-  primaryBtnText: {
-    color: COLORS.bg,
-    fontSize: 16,
-    fontWeight: "700",
-    letterSpacing: 0.5,
-  },
-  secondaryBtn: {
-    backgroundColor: "transparent",
-    borderWidth: 1,
-    borderColor: COLORS.accentBorder,
-    borderRadius: RADIUS.lg,
-    paddingVertical: 14,
-    width: "100%",
-    alignItems: "center",
-  },
-  secondaryBtnText: {
-    color: COLORS.accent,
-    fontSize: 14,
-    fontWeight: "600",
-  },
-  hint: {
-    color: COLORS.textMuted,
-    fontSize: 12,
-    fontStyle: "italic",
-    textAlign: "center",
-    marginTop: 4,
-  },
-  analyzingBox: {
-    alignItems: "center",
-    justifyContent: "center",
-    paddingVertical: 60,
-    gap: 16,
-  },
-  analyzingText: {
-    color: COLORS.accent,
-    fontSize: 12,
-    fontFamily: "Courier New",
+  locationPin: { fontSize: 18 },
+  locationLabel: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: COLORS.gold,
     letterSpacing: 1,
   },
-  recentSection: {
-    gap: 8,
+  locationSub: {
+    fontSize: 12,
+    color: 'rgba(255,255,255,0.55)',
+    fontStyle: 'italic',
+    marginTop: 2,
   },
+
+  scansText: {
+    textAlign: 'center',
+    fontSize: 13,
+    color: 'rgba(255,255,255,0.6)',
+    marginBottom: 14,
+  },
+
+  // Primary action (unchanged from your current style)
+  primaryBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 10,
+    backgroundColor: COLORS.gold,
+    borderRadius: RADIUS,
+    paddingVertical: 22,
+    marginBottom: 12,
+  },
+  primaryIcon: { fontSize: 22 },
+  primaryLabel: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: '#0F0D0B',
+  },
+
+  // Secondary action — filled dark surface, reads as a real button
+  secondaryBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 12,
+    backgroundColor: '#1E1A14',
+    borderWidth: 1,
+    borderColor: 'rgba(245, 200, 66, 0.35)',
+    borderRadius: RADIUS,
+    paddingVertical: 14,
+    marginHorizontal: 24, // slight inset visually subordinates it to Take Photo
+    marginBottom: 20,
+  },
+  secondaryIcon: { fontSize: 20 },
+  secondaryTextWrap: { alignItems: 'flex-start' },
+  secondaryLabel: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: COLORS.gold,
+  },
+  secondarySub: {
+    fontSize: 11,
+    color: 'rgba(255,255,255,0.5)',
+    marginTop: 2,
+  },
+
+  categoryLine: {
+    textAlign: 'center',
+    color: 'rgba(255,255,255,0.5)',
+    fontSize: 13,
+    marginBottom: 22,
+  },
+
+  // Recent Saves
   recentHeader: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    marginBottom: 4,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 10,
   },
-  recentLabel: {
-    color: COLORS.textMuted,
-    fontSize: 9,
-    fontFamily: "Courier New",
-    letterSpacing: 2,
+  recentTitle: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: 'rgba(255,255,255,0.55)',
+    letterSpacing: 1.2,
   },
   seeAll: {
-    color: COLORS.accent,
-    fontSize: 9,
-    fontFamily: "Courier New",
-    letterSpacing: 1,
+    fontSize: 12,
+    fontWeight: '700',
+    color: COLORS.gold,
+    letterSpacing: 0.6,
   },
   recentCard: {
-    backgroundColor: COLORS.surface,
-    borderWidth: 1,
-    borderColor: COLORS.border,
-    borderRadius: RADIUS.md,
-    padding: 14,
+    backgroundColor: 'rgba(255,255,255,0.04)',
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 10,
   },
   recentSubject: {
-    color: COLORS.textPrimary,
-    fontSize: 15,
-    fontWeight: "600",
+    fontSize: 17,
+    fontWeight: '600',
+    color: '#FFFFFF',
     marginBottom: 4,
   },
-  recentMeta: {
-    flexDirection: "row",
-    gap: 10,
-    alignItems: "center",
-  },
   recentDate: {
-    color: COLORS.textMuted,
-    fontSize: 11,
-    fontStyle: "italic",
-  },
-  recentLocation: {
-    color: COLORS.green,
-    fontSize: 10,
-    fontFamily: "Courier New",
-    flex: 1,
-  },
-  tutorialBtn: {
-    alignItems: "center",
-    paddingVertical: 14,
-    marginTop: 20,
-    borderTopWidth: 1,
-    borderTopColor: "rgba(255,255,255,0.06)",
-  },
-  tutorialBtnText: {
-    color: "rgba(255,255,255,0.25)",
     fontSize: 12,
-    fontStyle: "italic",
+    color: 'rgba(255,255,255,0.45)',
   },
-  multiViewBtn: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
+  emptyHint: {
+    color: 'rgba(255,255,255,0.35)',
+    fontSize: 13,
+    fontStyle: 'italic',
+    marginBottom: 12,
+  },
+
+  // Tutorial chip — visible without shouting
+  tutorialChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
     gap: 8,
-    backgroundColor: COLORS.surface,
-    borderWidth: 1,
-    borderColor: COLORS.accentBorder,
-    borderRadius: RADIUS.lg,
-    paddingVertical: 14,
+    alignSelf: 'center',
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    borderRadius: 20,
+    paddingVertical: 9,
+    paddingHorizontal: 18,
+    marginTop: 24,
   },
-  multiViewBtnIcon: {
-    fontSize: 16,
+  tutorialIcon: {
+    fontSize: 11,
+    color: 'rgba(255,255,255,0.75)',
   },
-  multiViewBtnText: {
-    color: COLORS.accent,
-    fontSize: 14,
-    fontWeight: "600",
+  tutorialLabel: {
+    fontSize: 13,
+    fontWeight: '500',
+    color: 'rgba(255,255,255,0.8)',
   },
 });
